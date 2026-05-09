@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -38,29 +39,26 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 }
 
 func (s *Server) Start() error {
+	logger := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("!!! HTTP REQUEST !!! Method=%s Host=%s Path=%s Remote=%s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+			for k, v := range r.Header {
+				log.Printf("  HEADER: %s = %v", k, v)
+			}
+			os.Stdout.Sync()
+			next.ServeHTTP(w, r)
+		})
+	}
+
 	mux := http.NewServeMux()
-
-	// 1. WebSocket Handler (High Priority)
 	mux.HandleFunc("/ws", s.handleWebSocket)
-
-	// 2. Control API Handlers
 	for pattern, handler := range s.handlers {
 		mux.HandleFunc(pattern, handler)
 	}
 
-	// 3. Static Files
 	fileServer := http.FileServer(http.Dir("./static"))
 
-	// 4. Greedy Middleware & Router
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// LOG EVERYTHING
-		log.Printf("!!! HTTP REQUEST !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
-		for k, v := range r.Header {
-			log.Printf("  HEADER: %s = %v", k, v)
-		}
-		os.Stdout.Sync()
-
-		// Is it a known captive portal check path?
 		path := r.URL.Path
 		isProbe := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
@@ -69,33 +67,41 @@ func (s *Server) Start() error {
 			strings.Contains(path, "hotspot-detect") ||
 			strings.Contains(path, "success.txt")
 
-		// If it's a probe, give them exactly what they want: 204 No Content
 		if isProbe {
-			log.Printf("!!! SATISFYING PROBE !!! -> 204")
+			log.Printf("!!! SATISFYING CONNECTIVITY PROBE !!! -> 204")
+			os.Stdout.Sync()
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// If it's a request for our actual app domain or IP, serve the files
-		// Otherwise, if it's some random domain like 'www.google.com' (intercepted),
-		// we return 204 to trick the background service into thinking internet is up.
 		if r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream") {
-			mux.ServeHTTP(w, r) // Let ServeMux handle defined routes
+			mux.ServeHTTP(w, r)
 		} else {
-			// Random domain probe
-			log.Printf("!!! DOMAIN HIJACK PROBE !!! (%s) -> 204", r.Host)
+			log.Printf("!!! HIJACKING RANDOM DOMAIN REQUEST (%s) !!! -> 204", r.Host)
+			os.Stdout.Sync()
 			w.WriteHeader(http.StatusNoContent)
 		}
 	})
 
-	// Default fallback to file server
 	mux.Handle("/", fileServer)
 
-	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
-	os.Stdout.Sync()
+	// Listen on Port 80 AND the requested address
+	go func() {
+		log.Printf("Attempting to bind directly to Port 80 (Standard Web)...")
+		ln, err := net.Listen("tcp", ":80")
+		if err != nil {
+			log.Printf("!!! PORT 80 BIND ERROR !!!: %v (Use sudo setcap)", err)
+			return
+		}
+		log.Printf("SUCCESS: Server listening on Port 80")
+		os.Stdout.Sync()
+		http.Serve(ln, logger(mainHandler))
+	}()
 
-	return http.ListenAndServe(s.addr, mainHandler)
+	log.Printf("Starting primary listener on %s", s.addr)
+	os.Stdout.Sync()
+	return http.ListenAndServe(s.addr, logger(mainHandler))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

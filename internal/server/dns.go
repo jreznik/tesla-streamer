@@ -18,7 +18,8 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
+	// Bind DIRECTLY to port 53 for maximum reliability
+	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:53")
 	if err != nil {
 		return err
 	}
@@ -26,11 +27,12 @@ func (s *DNSSpoofer) Start() error {
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		log.Printf("!!! DNS STARTUP ERROR !!!: %v", err)
+		log.Printf("HINT: Run 'sudo setcap cap_net_bind_service=+ep ./tesla-streamer'")
 		return err
 	}
 	s.conn = conn
 
-	log.Printf("DNS SPOOFER ALIVE on %s", s.conn.LocalAddr().String())
+	log.Printf("DNS SPOOFER ACTIVE on %s. All names -> %s", s.conn.LocalAddr().String(), s.targetIP)
 	os.Stdout.Sync()
 
 	go func() {
@@ -60,7 +62,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("INCOMING DNS PROBE: %s [%s]", name, question.Type.String())
+		log.Printf("INCOMING DNS PROBE: %s [%s] from %s", name, question.Type.String(), addr.String())
 		os.Stdout.Sync()
 
 		msg.Response = true
@@ -79,12 +81,18 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 					Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
 				}
 				msg.Answers = append(msg.Answers, answer)
-				log.Printf("SPOOFING A -> %s", s.targetIP)
+				log.Printf("SPOOFING ANSWER: %s -> %s", name, s.targetIP)
+				os.Stdout.Sync()
 			}
 		} else if question.Type == dnsmessage.TypeAAAA {
 			log.Printf("SPOOFING AAAA -> EMPTY (Force IPv4)")
-			// No answer provided, but we return a success response to prevent timeout
+			os.Stdout.Sync()
+			// Return successful response with no answers to force IPv4 fallback
 		}
+	}
+
+	if len(msg.Answers) == 0 && !msg.Response {
+		return
 	}
 
 	packed, err := msg.Pack()
