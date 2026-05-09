@@ -45,7 +45,7 @@ type connLogger struct {
 func (l *connLogger) Accept() (net.Conn, error) {
 	c, err := l.Listener.Accept()
 	if err == nil {
-		log.Printf("!!! RAW TCP CONNECTION !!! From: %s -> To: %s", c.RemoteAddr(), c.LocalAddr())
+		log.Printf("!!! RAW TCP CONNECTION !!! From: %s", c.RemoteAddr())
 		os.Stdout.Sync()
 	}
 	return c, err
@@ -62,19 +62,13 @@ func (s *Server) Start() error {
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ua := r.Header.Get("User-Agent")
-		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, r.Host, r.URL.Path, ua)
-		
-		// Anti-Cache & Identity Headers
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
-		w.Header().Set("X-Android-Response", "204") // Specific for some Android versions
-		w.Header().Set("Connection", "close")
-
+		host := r.Host
 		path := r.URL.Path
 
-		// 1. Identify System Probes
+		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, host, path, ua)
+		os.Stdout.Sync()
+
+		// 1. Identify Background System Services
 		isSystem := strings.Contains(ua, "Dalvik") || 
 			strings.Contains(ua, "CaptivePortal") || 
 			strings.Contains(ua, "NetworkCheck") ||
@@ -84,26 +78,51 @@ func (s *Server) Start() error {
 		isProbePath := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
 			strings.Contains(path, "check_network_status") ||
-			strings.Contains(path, "connecttest") ||
-			strings.Contains(path, "hotspot-detect") ||
 			strings.Contains(path, "success.txt") ||
-			strings.Contains(path, "success.html")
+			strings.Contains(path, "ncsi.txt") ||
+			strings.Contains(path, "connecttest") ||
+			strings.Contains(path, "hotspot-detect")
 
-		// 3. Satisfy Probes with ZERO-BYTE 204
+		// 3. Force Standard Online Responses
+		// Set headers first
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("Connection", "close")
+		w.Header().Set("X-Android-Response", "204")
+
 		if isSystem || isProbePath {
-			log.Printf("!!! SATISFYING SYSTEM PROBE !!! -> 204 No Content")
-			os.Stdout.Sync()
+			// A. Microsoft NCSI Specific String
+			if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
+				log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK")
+				w.Header().Set("Content-Type", "text/plain")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("Microsoft Connect Test"))
+				return
+			}
+
+			// B. Apple Success Specific HTML
+			if strings.Contains(path, "hotspot-detect.html") {
+				log.Printf("!!! SATISFYING APPLE PROBE !!! -> 200 OK")
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
+				return
+			}
+
+			// C. Universal 204 No Content for all other background probes
+			log.Printf("!!! SATISFYING CONNECTIVITY CHECK !!! -> 204 No Content")
 			w.WriteHeader(http.StatusNoContent)
-			// Ensure absolute zero-byte body
 			return
 		}
 
 		// 4. Intentional App Access
+		// Serve actual app for real browsers or intentional IP/Domain access
 		isBrowser := strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") || strings.Contains(ua, "Safari")
+		isTargetHost := host == "10.42.0.1" || host == "10.42.0.1:8080" || strings.Contains(host, "tesla.stream")
 
-		if isBrowser && (r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream")) {
-			// Serve the actual app
-			if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
+		if isBrowser && isTargetHost {
+			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
 				fileServer.ServeHTTP(w, r)
@@ -112,8 +131,8 @@ func (s *Server) Start() error {
 		}
 
 		// 5. Catch-all for hijacked domains (Greedy 204)
-		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", r.Host)
-		os.Stdout.Sync()
+		// Convince background services that they hit the internet.
+		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", host)
 		w.WriteHeader(http.StatusNoContent)
 	})
 
