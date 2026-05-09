@@ -42,11 +42,11 @@ bool FirewallManagerLinux::configureFirewall() {
         for (const QString &zoneName : zones) {
             emit messageLogged("Enabling redirection in zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
-            addPort(zoneName, "5353", "udp"); 
+            addPort(zoneName, "5354", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
             
-            // Redirect 53 -> 5353 (DNS)
-            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5353\"");
+            // Redirect 53 -> 5354 (DNS)
+            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
             // Redirect 80 -> 8080 (HTTP)
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             
@@ -60,11 +60,11 @@ bool FirewallManagerLinux::configureFirewall() {
         QString iface = "wlp114s0f0";
 
         // Interception Rules using DNAT (Force traffic from car to hit our local ports)
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5353"});
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5354"});
         ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", "10.42.0.1:8080"});
         
         // ACCEPT Rules for the local machine
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
 
@@ -93,17 +93,17 @@ bool FirewallManagerLinux::cleanupFirewall() {
 
         for (const QString &zoneName : zones) {
             removePort(zoneName, "8080", "tcp");
-            removePort(zoneName, "5353", "udp");
+            removePort(zoneName, "5354", "udp");
             removePort(zoneName, "49152-65535", "udp");
-            removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5353\"");
+            removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             fw.call("removeMasquerade", zoneName);
         }
     } else {
         QString iface = "wlp114s0f0";
-        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5353"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5354"});
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", "10.42.0.1:8080"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
     }

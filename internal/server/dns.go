@@ -18,9 +18,9 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Listen on 5353 to avoid conflict with dnsmasq (which NM starts on 53)
-	// We will use iptables REDIRECT to send 53 -> 5353
-	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5353")
+	// Listen on 5354 to avoid conflict with Avahi/mDNS (5353) and dnsmasq (53)
+	// We will use iptables REDIRECT to send 53 -> 5354
+	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
 	if err != nil {
 		return err
 	}
