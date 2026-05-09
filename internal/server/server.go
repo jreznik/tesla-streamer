@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -37,6 +38,19 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 	s.handlers[pattern] = handler
 }
 
+type connLogger struct {
+	net.Listener
+}
+
+func (l *connLogger) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		log.Printf("!!! RAW TCP CONNECTION !!! From: %s -> To: %s", c.RemoteAddr(), c.LocalAddr())
+		os.Stdout.Sync()
+	}
+	return c, err
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -50,17 +64,12 @@ func (s *Server) Start() error {
 		ua := r.Header.Get("User-Agent")
 		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, r.Host, r.URL.Path, ua)
 		
-		// EXHAUSTIVE HEADER LOGGING
-		for k, v := range r.Header {
-			log.Printf("  HEADER [%s] = %v", k, v)
-		}
-		os.Stdout.Sync()
-
-		// Anti-Cache Headers (Universal)
+		// Anti-Cache & Identity Headers
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
+		w.Header().Set("X-Android-Response", "204") // Specific for some Android versions
 		w.Header().Set("Connection", "close")
 
 		path := r.URL.Path
@@ -71,7 +80,7 @@ func (s *Server) Start() error {
 			strings.Contains(ua, "NetworkCheck") ||
 			ua == ""
 
-		// 2. Identify Known Probe Paths
+		// 2. Identify Connectivity Probes by Path
 		isProbePath := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
 			strings.Contains(path, "check_network_status") ||
@@ -80,42 +89,21 @@ func (s *Server) Start() error {
 			strings.Contains(path, "success.txt") ||
 			strings.Contains(path, "success.html")
 
-		// 3. Satisfy Probes
+		// 3. Satisfy Probes with ZERO-BYTE 204
 		if isSystem || isProbePath {
-			// Specific handling for root path probes from system (e.g. hitting gateway IP directly)
-			if path == "/" {
-				log.Printf("!!! SATISFYING SYSTEM ROOT PROBE !!! -> 200 OK 'success'")
-				os.Stdout.Sync()
-				w.Header().Set("Content-Type", "text/plain")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("success\n"))
-				return
-			}
-
-			// Specific handling for Microsoft / Android NCSI strings
-			if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
-				log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK 'Microsoft Connect Test'")
-				os.Stdout.Sync()
-				w.Header().Set("Content-Type", "text/plain")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("Microsoft Connect Test"))
-				return
-			}
-
-			// Standard 204 success for all other probes
-			log.Printf("!!! SATISFYING PROBE PATH !!! -> 204 No Content")
+			log.Printf("!!! SATISFYING SYSTEM PROBE !!! -> 204 No Content")
 			os.Stdout.Sync()
 			w.WriteHeader(http.StatusNoContent)
+			// Ensure absolute zero-byte body
 			return
 		}
 
 		// 4. Intentional App Access
-		// Check for real browser User-Agent
 		isBrowser := strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") || strings.Contains(ua, "Safari")
 
 		if isBrowser && (r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream")) {
-			// Root request = serve app
-			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
+			// Serve the actual app
+			if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
 				fileServer.ServeHTTP(w, r)
@@ -123,8 +111,7 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// 5. Greedy Hijack (Random domains hijacked by DNS)
-		// We return 204 to trick background internet checks that resolve random names.
+		// 5. Catch-all for hijacked domains (Greedy 204)
 		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", r.Host)
 		os.Stdout.Sync()
 		w.WriteHeader(http.StatusNoContent)
@@ -133,7 +120,13 @@ func (s *Server) Start() error {
 	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
 	os.Stdout.Sync()
 
-	return http.ListenAndServe(s.addr, mainHandler)
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return err
+	}
+	loggedLn := &connLogger{ln}
+
+	return http.Serve(loggedLn, mainHandler)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
