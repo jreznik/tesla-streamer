@@ -49,7 +49,6 @@ private slots:
     void updateConfig();
     void toggleHotspot();
     void toggleLogs();
-    void configureFirewall();
     void handleControlReply(QNetworkReply *reply);
     void onHotspotStateChanged(bool active);
 
@@ -77,7 +76,6 @@ private:
     QGroupBox *m_networkGroup;
     QComboBox *m_hotspotDeviceCombo;
     QPushButton *m_hotspotBtn;
-    QPushButton *m_fwBtn;
     QLabel *m_hotspotInfoLabel;
 
     // Control Group

@@ -86,11 +86,6 @@ void MainWindow::setupUI() {
     networkLayout->addWidget(m_hotspotBtn);
     connect(m_hotspotBtn, &QPushButton::clicked, this, &MainWindow::toggleHotspot);
 
-    m_fwBtn = new QPushButton("Fix Firewall");
-    m_fwBtn->setFixedHeight(35);
-    networkLayout->addWidget(m_fwBtn);
-    connect(m_fwBtn, &QPushButton::clicked, this, &MainWindow::configureFirewall);
-
     mainLayout->addWidget(m_networkGroup);
 
     // --- Row 3: Action Buttons ---
@@ -188,8 +183,6 @@ void MainWindow::toggleServer() {
     if (m_process->state() == QProcess::Running) {
         stopServer();
     } else {
-        // Automatically try to fix firewall when starting server
-        m_fwManager->configureFirewall();
         startServer();
     }
 }
@@ -198,6 +191,9 @@ void MainWindow::toggleHotspot() {
     if (m_netManager->isHotspotActive()) {
         m_netManager->stopHotspot();
     } else {
+        // Automatically setup firewall as first step of hotspot start
+        m_fwManager->configureFirewall();
+        
         m_logArea->append("Requesting Hotspot start...");
         QString iface = m_hotspotDeviceCombo->currentText();
         if (!m_netManager->startHotspot("TeslaStreamer", "tesla123", iface)) {
@@ -212,10 +208,6 @@ void MainWindow::toggleLogs() {
     m_toggleLogsBtn->setText(visible ? "Show Logs" : "Hide Logs");
 }
 
-void MainWindow::configureFirewall() {
-    m_fwManager->configureFirewall();
-}
-
 void MainWindow::onHotspotStateChanged(bool active) {
     if (active) {
         m_hotspotBtn->setText("Stop Hotspot");
@@ -225,6 +217,9 @@ void MainWindow::onHotspotStateChanged(bool active) {
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
     } else {
+        // Cleanup firewall when hotspot is stopped
+        m_fwManager->cleanupFirewall();
+
         m_hotspotBtn->setText("Start Hotspot");
         m_hotspotDeviceCombo->setEnabled(true);
         m_hotspotInfoLabel->setVisible(false);

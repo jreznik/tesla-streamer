@@ -11,6 +11,7 @@ public:
     virtual ~IFirewallManager() {}
 
     virtual bool configureFirewall() = 0;
+    virtual bool cleanupFirewall() = 0;
 
 signals:
     void messageLogged(const QString &msg);

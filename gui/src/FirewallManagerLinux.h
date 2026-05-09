@@ -12,10 +12,13 @@ public:
     ~FirewallManagerLinux();
 
     bool configureFirewall() override;
+    bool cleanupFirewall() override;
 
 private:
     bool addPort(const QString &zone, const QString &port, const QString &protocol);
+    bool removePort(const QString &zone, const QString &port, const QString &protocol);
     bool addRichRule(const QString &zone, const QString &rule);
+    bool removeRichRule(const QString &zone, const QString &rule);
 };
 
 #endif
