@@ -16,11 +16,14 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 }
 
 bool FirewallManagerLinux::configureFirewall() {
-    emit messageLogged("Configuring system ports (Standard 53/80)...");
+    emit messageLogged("Enabling REDIRECT Mode (Kernel-Level)...");
     
-    if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
-        emit messageLogged("Using firewalld D-Bus...");
+    bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
+    
+    if (hasFirewallD) {
+        emit messageLogged("Using firewalld D-Bus Redirects...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
+        
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
         
@@ -31,36 +34,45 @@ bool FirewallManagerLinux::configureFirewall() {
             arg >> activeZones;
             zones = activeZones.keys();
         }
+        if (zones.isEmpty()) {
+            QDBusReply<QString> defaultZone = fw.call("getDefaultZone");
+            if (defaultZone.isValid()) zones << defaultZone.value();
+        }
         if (!zones.contains("nm-shared")) zones << "nm-shared";
         if (!zones.contains("public")) zones << "public";
 
         for (const QString &zoneName : zones) {
-            emit messageLogged("Opening ports in zone: " + zoneName);
-            addPort(zoneName, "80", "tcp"); 
-            addPort(zoneName, "53", "udp"); 
             addPort(zoneName, "8080", "tcp"); 
+            addPort(zoneName, "5353", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
+            
+            // Redirect 53 -> 5353 (DNS)
+            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5353\"");
+            // Redirect 80 -> 8080 (HTTP)
+            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+            
             fw.call("addMasquerade", zoneName, 0);
         }
         return true;
     } else {
-        emit messageLogged("firewalld not found. Using iptables ACCEPT rules...");
+        emit messageLogged("Using iptables REDIRECT targets...");
         bool ok = true;
-        // Just ACCEPT traffic on standard ports (Since we are binding directly now)
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "53", "-j", "ACCEPT"});
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"});
+        // Priority Interception (-I to put at top)
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        
+        // ACCEPT Rules
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
 
-        if (ok) {
-            emit messageLogged("SUCCESS: iptables allowed 53/80/8080.");
-        }
+        if (ok) emit messageLogged("SUCCESS: iptables redirection active.");
         return ok;
     }
 }
 
 bool FirewallManagerLinux::cleanupFirewall() {
-    emit messageLogged("Restoring firewall...");
+    emit messageLogged("Cleaning up firewall...");
     if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
@@ -76,19 +88,21 @@ bool FirewallManagerLinux::cleanupFirewall() {
         if (!zones.contains("public")) zones << "public";
 
         for (const QString &zoneName : zones) {
-            removePort(zoneName, "80", "tcp");
-            removePort(zoneName, "53", "udp");
             removePort(zoneName, "8080", "tcp");
+            removePort(zoneName, "5353", "udp");
             removePort(zoneName, "49152-65535", "udp");
+            removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5353\"");
+            removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             fw.call("removeMasquerade", zoneName);
         }
     } else {
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "53", "-j", "ACCEPT"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
     }
-    emit messageLogged("Firewall restored.");
+    emit messageLogged("Firewall cleaned.");
     return true;
 }
 

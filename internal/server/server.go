@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -21,8 +20,6 @@ type Server struct {
 }
 
 func NewServer(addr string) *Server {
-	// Standard output logging
-	log.SetFlags(log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
 	return &Server{
 		addr: addr,
@@ -40,10 +37,10 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 }
 
 func (s *Server) Start() error {
-	// Global logger middleware
 	logger := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("!!! HTTP REQUEST DETECTED !!! Method=%s Host=%s Path=%s Remote=%s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+			log.Printf("!!! HTTP ACCESS !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+			os.Stdout.Sync()
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -52,9 +49,9 @@ func (s *Server) Start() error {
 	mux.Handle("/", http.FileServer(http.Dir("./static")))
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	
-	// Connectivity check handlers
 	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! CAPTIVE PORTAL PROBE !!! %s", r.URL.Path)
+		log.Printf("!!! PORTAL PROBE SUCCESS !!! %s", r.URL.Path)
+		os.Stdout.Sync()
 		w.WriteHeader(http.StatusNoContent)
 	}
 	
@@ -62,44 +59,29 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/gen_204", connectivityHandler)
 	mux.HandleFunc("/check_network_status", connectivityHandler)
 	mux.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! MSFT CONNECT TEST !!!")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("Microsoft Connect Test"))
 	})
 	mux.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! APPLE HOTSPOT DETECT !!!")
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
-	})
-	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! MANUAL PING !!!")
-		w.Write([]byte("PONG - Server is reachable"))
 	})
 
 	for pattern, handler := range s.handlers {
 		mux.HandleFunc(pattern, handler)
 	}
 
-	// Listen on Port 80 AND the requested address (if different)
-	go func() {
-		log.Printf("Attempting to listen on Port 80 (Standard Web)...")
-		ln, err := net.Listen("tcp", ":80")
-		if err != nil {
-			log.Printf("!!! PORT 80 BIND ERROR !!! %v", err)
-			return
-		}
-		log.Printf("SUCCESS: Server active on Port 80")
-		http.Serve(ln, logger(mux))
-	}()
+	log.Printf("--------------------------------------------------")
+	log.Printf("TESLA STREAMER BACKEND STARTING ON %s", s.addr)
+	log.Printf("--------------------------------------------------")
+	os.Stdout.Sync()
 
-	log.Printf("Starting primary listener on %s", s.addr)
 	return http.ListenAndServe(s.addr, logger(mux))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -108,7 +90,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clients[conn] = true
 	s.mu.Unlock()
 
-	log.Printf("!!! NEW WEBSOCKET CLIENT !!! %s", r.RemoteAddr)
+	log.Printf("NEW WEBSOCKET CLIENT: %s", r.RemoteAddr)
+	os.Stdout.Sync()
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -116,7 +99,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.mu.Lock()
 			delete(s.clients, conn)
 			s.mu.Unlock()
-			log.Printf("WebSocket disconnected: %s", r.RemoteAddr)
 			break
 		}
 		s.msgChan <- msg
