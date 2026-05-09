@@ -75,6 +75,7 @@ private:
     // Network Group
     QGroupBox *m_networkGroup;
     QComboBox *m_hotspotDeviceCombo;
+    QCheckBox *m_offlineCheckbox;
     QPushButton *m_hotspotBtn;
     QLabel *m_hotspotInfoLabel;
 

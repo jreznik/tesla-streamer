@@ -80,6 +80,10 @@ void MainWindow::setupUI() {
     m_hotspotDeviceCombo->setMinimumWidth(100);
     networkLayout->addWidget(m_hotspotDeviceCombo);
 
+    m_offlineCheckbox = new QCheckBox("Offline Mode");
+    m_offlineCheckbox->setToolTip("Enable DNS/HTTP spoofing for environments with no cellular signal");
+    networkLayout->addWidget(m_offlineCheckbox);
+
     m_hotspotBtn = new QPushButton("Start Hotspot");
     m_hotspotBtn->setFixedHeight(35);
     m_hotspotBtn->setMinimumWidth(120);
@@ -191,8 +195,10 @@ void MainWindow::toggleHotspot() {
     if (m_netManager->isHotspotActive()) {
         m_netManager->stopHotspot();
     } else {
-        // Automatically setup firewall as first step of hotspot start
-        m_fwManager->configureFirewall();
+        // Automatically setup firewall as first step of hotspot start IF offline mode is enabled
+        if (m_offlineCheckbox->isChecked()) {
+            m_fwManager->configureFirewall();
+        }
         
         m_logArea->append("Requesting Hotspot start...");
         QString iface = m_hotspotDeviceCombo->currentText();
@@ -212,6 +218,7 @@ void MainWindow::onHotspotStateChanged(bool active) {
     if (active) {
         m_hotspotBtn->setText("Stop Hotspot");
         m_hotspotDeviceCombo->setEnabled(false);
+        m_offlineCheckbox->setEnabled(false);
         m_hotspotInfoLabel->setVisible(true);
         m_urlLabel->setText(QString("Connect at: <b>%1</b>").arg(m_netManager->getHotspotUrl()));
         m_urlLabel->setVisible(true);
@@ -222,6 +229,7 @@ void MainWindow::onHotspotStateChanged(bool active) {
 
         m_hotspotBtn->setText("Start Hotspot");
         m_hotspotDeviceCombo->setEnabled(true);
+        m_offlineCheckbox->setEnabled(true);
         m_hotspotInfoLabel->setVisible(false);
         m_urlLabel->setText("Connect at: <b>http://localhost:8080</b>");
         // Refresh interface list
