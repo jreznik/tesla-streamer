@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -22,11 +21,9 @@ type Server struct {
 }
 
 func NewServer(addr string) *Server {
-	// Force logs to be unbuffered and immediate
+	// Standard output logging
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
-	fmt.Println("CRITICAL: Extreme Logging Initialized. Every request will be reported.")
-
 	return &Server{
 		addr: addr,
 		upgrader: websocket.Upgrader{
@@ -83,19 +80,20 @@ func (s *Server) Start() error {
 		mux.HandleFunc(pattern, handler)
 	}
 
-	log.Printf("STARTING EXTREME SERVER ON %s", s.addr)
-	
-	// Create a listener to log raw connection attempts
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
+	// Listen on Port 80 AND the requested address (if different)
+	go func() {
+		log.Printf("Attempting to listen on Port 80 (Standard Web)...")
+		ln, err := net.Listen("tcp", ":80")
+		if err != nil {
+			log.Printf("!!! PORT 80 BIND ERROR !!! %v", err)
+			return
+		}
+		log.Printf("SUCCESS: Server active on Port 80")
+		http.Serve(ln, logger(mux))
+	}()
 
-	server := &http.Server{
-		Handler: logger(mux),
-	}
-
-	return server.Serve(ln)
+	log.Printf("Starting primary listener on %s", s.addr)
+	return http.ListenAndServe(s.addr, logger(mux))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
