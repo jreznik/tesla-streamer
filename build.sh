@@ -21,6 +21,7 @@ BUILD_BACKEND=false
 BUILD_GUI=false
 BUILD_FLATPAK=false
 BUILD_DECKY=false
+CLEAN=false
 
 show_help() {
     echo "Usage: ./build.sh [options]"
@@ -28,9 +29,10 @@ show_help() {
     echo "Options:"
     echo "  --backend    Build the Go backend binary"
     echo "  --gui        Build the C++ Qt GUI application"
-    echo "  --flatpak    Build the Flatpak package"
+    echo "  --flatpak    Build the Flatpak package and generate .flatpak bundle"
     echo "  --decky      Build the Decky Loader plugin"
     echo "  --all        Build all of the above"
+    echo "  --clean      Clean all build artifacts and temporary files"
     echo "  --help       Show this help message"
     echo ""
 }
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             BUILD_DECKY=true
             shift
             ;;
+        --clean)
+            CLEAN=true
+            shift
+            ;;
         --help)
             show_help
             exit 0
@@ -76,6 +82,19 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "$CLEAN" = true ]; then
+    echo "--- Cleaning Build Artifacts ---"
+    rm -rf gui/build
+    rm -rf build-dir
+    rm -rf repo
+    rm -rf .flatpak-builder
+    rm -f TeslaStreamer.flatpak
+    rm -f tesla-streamer
+    rm -rf decky-plugin/dist
+    rm -rf vendor
+    echo "Clean complete."
+fi
 
 if [ "$BUILD_BACKEND" = true ]; then
     echo "--- Building Go Backend ---"
@@ -95,13 +114,19 @@ if [ "$BUILD_GUI" = true ]; then
 fi
 
 if [ "$BUILD_FLATPAK" = true ]; then
-    echo "--- Building Flatpak Package ---"
+    echo "--- Building Flatpak Package & Bundle ---"
     if ! command -v flatpak-builder &> /dev/null; then
         echo "ERROR: flatpak-builder not found. Please install it to build the Flatpak."
         exit 1
     fi
-    flatpak-builder --force-clean build-dir io.github.jreznik.TeslaStreamer.yaml
-    echo "Flatpak build complete in build-dir/"
+    
+    # Ensure vendor directory is up to date for Flatpak build
+    echo "Syncing vendor directory..."
+    go mod vendor
+    
+    flatpak-builder --force-clean --repo=repo build-dir io.github.jreznik.TeslaStreamer.yaml
+    flatpak build-bundle repo TeslaStreamer.flatpak io.github.jreznik.TeslaStreamer
+    echo "Flatpak bundle generated: TeslaStreamer.flatpak"
 fi
 
 if [ "$BUILD_DECKY" = true ]; then
@@ -115,6 +140,10 @@ if [ "$BUILD_DECKY" = true ]; then
     pnpm run build
     cd ..
     echo "Decky plugin build complete in decky-plugin/dist/"
+fi
+
+if [ "$CLEAN" = false ] && [ "$BUILD_BACKEND" = false ] && [ "$BUILD_GUI" = false ] && [ "$BUILD_FLATPAK" = false ] && [ "$BUILD_DECKY" = false ]; then
+    show_help
 fi
 
 echo ""
