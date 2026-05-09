@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -52,6 +53,7 @@ func (s *Server) Start() error {
 	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("!!! PORTAL PROBE SUCCESS !!! %s", r.URL.Path)
 		os.Stdout.Sync()
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.WriteHeader(http.StatusNoContent)
 	}
 	
@@ -59,10 +61,12 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/gen_204", connectivityHandler)
 	mux.HandleFunc("/check_network_status", connectivityHandler)
 	mux.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("!!! MSFT CONNECT TEST !!!")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("Microsoft Connect Test"))
 	})
 	mux.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("!!! APPLE HOTSPOT DETECT !!!")
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
 	})
@@ -76,7 +80,20 @@ func (s *Server) Start() error {
 	log.Printf("--------------------------------------------------")
 	os.Stdout.Sync()
 
-	return http.ListenAndServe(s.addr, logger(mux))
+	// Raw connection logger
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			// We can't easily wrap net.Listener to log without more boilerplate,
+			// but http.Server will call our logger middleware.
+		}
+	}()
+
+	return http.Serve(ln, logger(mux))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
