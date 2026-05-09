@@ -51,14 +51,15 @@ bool FirewallManagerLinux::configureFirewall() {
         success &= addPort(zoneName, "5353", "udp"); // Local DNS Spoofer
         success &= addPort(zoneName, "49152-65535", "udp"); // WebRTC Media
         
-        // 2. Transparent Redirection (NAT)
+        // 2. Aggressive Redirection (Rich Rules)
         // Redirection allows the car to work without specifying ports
+        // This intercepts ALL traffic on these ports, regardless of destination IP!
         
         // DNS: 53 -> 5353
-        success &= addForward(zoneName, "53", "udp", "5353");
+        success &= addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5353\"");
         
         // HTTP: 80 -> 8080
-        success &= addForward(zoneName, "80", "tcp", "8080");
+        success &= addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
 
         // 3. Enable Masquerading (Required for Forwarding/Bridging)
         QDBusReply<void> masqReply = fw.call("addMasquerade", zoneName, 0);
@@ -92,20 +93,19 @@ bool FirewallManagerLinux::addPort(const QString &zone, const QString &port, con
     return true;
 }
 
-bool FirewallManagerLinux::addForward(const QString &zone, const QString &port, const QString &protocol, const QString &toPort) {
+bool FirewallManagerLinux::addRichRule(const QString &zone, const QString &rule) {
     QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
     
-    // addForwardPort (zone, port, protocol, toport, toaddr, timeout)
-    // toaddr is empty for local redirection
-    QDBusReply<QString> reply = fw.call("addForwardPort", zone, port, protocol, toPort, "", 0);
+    // addRichRule (zone, rule, timeout)
+    QDBusReply<QString> reply = fw.call("addRichRule", zone, rule, 0);
     
     if (!reply.isValid()) {
         if (reply.error().name() == "org.fedoraproject.FirewallD1.Exception.ALREADY_ENABLED") {
             return true;
         }
-        emit messageLogged(QString("ERROR: Redirect %1->%2 failed: %3").arg(port, toPort, reply.error().message()));
+        emit messageLogged(QString("ERROR: Rich rule failed: %1").arg(reply.error().message()));
         return false;
     }
-    emit messageLogged(QString("Redirect active: %1/%2 -> %3").arg(port, protocol, toPort));
+    emit messageLogged(QString("Rich rule active: %1").arg(rule));
     return true;
 }

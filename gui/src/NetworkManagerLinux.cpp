@@ -98,11 +98,6 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
 
     QVariantMap ipv4;
     ipv4["method"] = "shared";
-    
-    // Attempt to point DNS to ourselves
-    QList<uint> dnsList;
-    dnsList << 0x01002a0a; // 10.42.0.1 in network byte order
-    ipv4["dns"] = QVariant::fromValue(dnsList);
 
     QVariantMap ipv6;
     ipv6["method"] = "ignore";
@@ -122,19 +117,7 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
     QDBusMessage reply = QDBusConnection::systemBus().call(msg);
     if (reply.type() == QDBusMessage::ErrorMessage) {
         emit messageLogged("ERROR: Failed to activate hotspot: " + reply.errorMessage());
-        if (reply.errorMessage().contains("ipv4.dns")) {
-            emit messageLogged("Retrying without custom DNS...");
-            settings["ipv4"].remove("dns");
-            msg = QDBusMessage::createMethodCall(NM_SERVICE, NM_PATH, NM_SERVICE, "AddAndActivateConnection");
-            msg << QVariant::fromValue(settings) << QDBusObjectPath(wifiDevicePath) << QDBusObjectPath("/");
-            reply = QDBusConnection::systemBus().call(msg);
-            if (reply.type() == QDBusMessage::ErrorMessage) {
-                emit messageLogged("Still failed: " + reply.errorMessage());
-                return false;
-            }
-        } else {
-            return false;
-        }
+        return false;
     }
 
     m_connectionPath = reply.arguments().at(0).value<QDBusObjectPath>().path();
