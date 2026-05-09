@@ -49,17 +49,29 @@ func (s *Server) Start() error {
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ua := r.Header.Get("User-Agent")
 		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, r.Host, r.URL.Path, ua)
+		
+		// EXHAUSTIVE HEADER LOGGING
+		for k, v := range r.Header {
+			log.Printf("  HEADER [%s] = %v", k, v)
+		}
 		os.Stdout.Sync()
 
-		// 1. Identify Background System Services
+		// Anti-Cache Headers (Universal)
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
+		w.Header().Set("Connection", "close")
+
+		path := r.URL.Path
+
+		// 1. Identify System Probes
 		isSystem := strings.Contains(ua, "Dalvik") || 
 			strings.Contains(ua, "CaptivePortal") || 
 			strings.Contains(ua, "NetworkCheck") ||
-			strings.Contains(ua, "MicroMessenger") ||
 			ua == ""
 
-		// 2. Identify Connectivity Probes by Path
-		path := r.URL.Path
+		// 2. Identify Known Probe Paths
 		isProbePath := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
 			strings.Contains(path, "check_network_status") ||
@@ -68,30 +80,42 @@ func (s *Server) Start() error {
 			strings.Contains(path, "success.txt") ||
 			strings.Contains(path, "success.html")
 
-		// 3. Satisfy background probes immediately
+		// 3. Satisfy Probes
 		if isSystem || isProbePath {
-			// If it's a specific string probe (Microsoft NCSI)
-			if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
-				log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 'Microsoft Connect Test'")
+			// Specific handling for root path probes from system (e.g. hitting gateway IP directly)
+			if path == "/" {
+				log.Printf("!!! SATISFYING SYSTEM ROOT PROBE !!! -> 200 OK 'success'")
+				os.Stdout.Sync()
 				w.Header().Set("Content-Type", "text/plain")
-				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("success\n"))
+				return
+			}
+
+			// Specific handling for Microsoft / Android NCSI strings
+			if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
+				log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK 'Microsoft Connect Test'")
+				os.Stdout.Sync()
+				w.Header().Set("Content-Type", "text/plain")
+				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("Microsoft Connect Test"))
 				return
 			}
 
-			log.Printf("!!! SATISFYING SYSTEM PROBE !!! -> 204 No Content")
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Header().Set("X-Tesla-Streamer-Spoof", "true")
+			// Standard 204 success for all other probes
+			log.Printf("!!! SATISFYING PROBE PATH !!! -> 204 No Content")
+			os.Stdout.Sync()
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// 4. Intentional App Access (Only for real browsers)
+		// 4. Intentional App Access
+		// Check for real browser User-Agent
 		isBrowser := strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") || strings.Contains(ua, "Safari")
 
 		if isBrowser && (r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream")) {
-			// Serve the actual app
-			if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
+			// Root request = serve app
+			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
 				fileServer.ServeHTTP(w, r)
@@ -99,9 +123,10 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// 5. Catch-all for hijacked domains (Greedy 204)
+		// 5. Greedy Hijack (Random domains hijacked by DNS)
+		// We return 204 to trick background internet checks that resolve random names.
 		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", r.Host)
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		os.Stdout.Sync()
 		w.WriteHeader(http.StatusNoContent)
 	})
 
