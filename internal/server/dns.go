@@ -18,8 +18,6 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Listen on 5354 to avoid conflict with Avahi/mDNS (5353) and dnsmasq (53)
-	// We will use iptables REDIRECT to send 53 -> 5354
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
 	if err != nil {
 		return err
@@ -32,11 +30,8 @@ func (s *DNSSpoofer) Start() error {
 	}
 	s.conn = conn
 
-	log.Printf("--------------------------------------------------")
 	log.Printf("DNS SPOOFER ALIVE on %s", s.conn.LocalAddr().String())
-	log.Printf("All incoming queries will resolve to %s", s.targetIP)
-	log.Printf("--------------------------------------------------")
-	os.Stdout.Sync() // Force flush
+	os.Stdout.Sync()
 
 	go func() {
 		buf := make([]byte, 512)
@@ -65,37 +60,31 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("INCOMING DNS PROBE: %s from %s", name, addr.String())
+		log.Printf("INCOMING DNS PROBE: %s [%s]", name, question.Type.String())
 		os.Stdout.Sync()
-
-		if question.Type != dnsmessage.TypeA {
-			continue
-		}
-
-		ip := net.ParseIP(s.targetIP).To4()
-		if ip == nil {
-			continue
-		}
-
-		answer := dnsmessage.Resource{
-			Header: dnsmessage.ResourceHeader{
-				Name:  question.Name,
-				Type:  dnsmessage.TypeA,
-				Class: dnsmessage.ClassINET,
-				TTL:   5,
-			},
-			Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
-		}
 
 		msg.Response = true
 		msg.Authoritative = true
-		msg.Answers = append(msg.Answers, answer)
-		log.Printf("SPOOFING ANSWER: %s -> %s", name, s.targetIP)
-		os.Stdout.Sync()
-	}
 
-	if len(msg.Answers) == 0 {
-		return
+		if question.Type == dnsmessage.TypeA {
+			ip := net.ParseIP(s.targetIP).To4()
+			if ip != nil {
+				answer := dnsmessage.Resource{
+					Header: dnsmessage.ResourceHeader{
+						Name:  question.Name,
+						Type:  dnsmessage.TypeA,
+						Class: dnsmessage.ClassINET,
+						TTL:   5,
+					},
+					Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
+				}
+				msg.Answers = append(msg.Answers, answer)
+				log.Printf("SPOOFING A -> %s", s.targetIP)
+			}
+		} else if question.Type == dnsmessage.TypeAAAA {
+			log.Printf("SPOOFING AAAA -> EMPTY (Force IPv4)")
+			// No answer provided, but we return a success response to prevent timeout
+		}
 	}
 
 	packed, err := msg.Pack()

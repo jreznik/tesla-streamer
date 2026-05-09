@@ -3,9 +3,9 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -38,62 +38,64 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 }
 
 func (s *Server) Start() error {
-	logger := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("!!! HTTP ACCESS !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
-			os.Stdout.Sync()
-			next.ServeHTTP(w, r)
-		})
-	}
-
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir("./static")))
-	mux.HandleFunc("/ws", s.handleWebSocket)
-	
-	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! PORTAL PROBE SUCCESS !!! %s", r.URL.Path)
-		os.Stdout.Sync()
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.WriteHeader(http.StatusNoContent)
-	}
-	
-	mux.HandleFunc("/generate_204", connectivityHandler)
-	mux.HandleFunc("/gen_204", connectivityHandler)
-	mux.HandleFunc("/check_network_status", connectivityHandler)
-	mux.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! MSFT CONNECT TEST !!!")
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("Microsoft Connect Test"))
-	})
-	mux.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! APPLE HOTSPOT DETECT !!!")
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
-	})
 
+	// 1. WebSocket Handler (High Priority)
+	mux.HandleFunc("/ws", s.handleWebSocket)
+
+	// 2. Control API Handlers
 	for pattern, handler := range s.handlers {
 		mux.HandleFunc(pattern, handler)
 	}
 
-	log.Printf("--------------------------------------------------")
-	log.Printf("TESLA STREAMER BACKEND STARTING ON %s", s.addr)
-	log.Printf("--------------------------------------------------")
+	// 3. Static Files
+	fileServer := http.FileServer(http.Dir("./static"))
+
+	// 4. Greedy Middleware & Router
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// LOG EVERYTHING
+		log.Printf("!!! HTTP REQUEST !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+		for k, v := range r.Header {
+			log.Printf("  HEADER: %s = %v", k, v)
+		}
+		os.Stdout.Sync()
+
+		// Is it a known captive portal check path?
+		path := r.URL.Path
+		isProbe := strings.Contains(path, "generate_204") || 
+			strings.Contains(path, "gen_204") || 
+			strings.Contains(path, "check_network_status") ||
+			strings.Contains(path, "connecttest") ||
+			strings.Contains(path, "hotspot-detect") ||
+			strings.Contains(path, "success.txt")
+
+		// If it's a probe, give them exactly what they want: 204 No Content
+		if isProbe {
+			log.Printf("!!! SATISFYING PROBE !!! -> 204")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// If it's a request for our actual app domain or IP, serve the files
+		// Otherwise, if it's some random domain like 'www.google.com' (intercepted),
+		// we return 204 to trick the background service into thinking internet is up.
+		if r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream") {
+			mux.ServeHTTP(w, r) // Let ServeMux handle defined routes
+		} else {
+			// Random domain probe
+			log.Printf("!!! DOMAIN HIJACK PROBE !!! (%s) -> 204", r.Host)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+
+	// Default fallback to file server
+	mux.Handle("/", fileServer)
+
+	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
 	os.Stdout.Sync()
 
-	// Raw connection logger
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			// We can't easily wrap net.Listener to log without more boilerplate,
-			// but http.Server will call our logger middleware.
-		}
-	}()
-
-	return http.Serve(ln, logger(mux))
+	return http.ListenAndServe(s.addr, mainHandler)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +109,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clients[conn] = true
 	s.mu.Unlock()
 
-	log.Printf("NEW WEBSOCKET CLIENT: %s", r.RemoteAddr)
+	log.Printf("WEBSOCKET CONNECTED: %s", r.RemoteAddr)
 	os.Stdout.Sync()
 
 	for {
