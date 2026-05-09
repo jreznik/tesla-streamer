@@ -15,6 +15,7 @@ public:
     bool cleanupFirewall() override;
 
 private:
+    bool runCommand(const QString &cmd, const QStringList &args);
     bool addPort(const QString &zone, const QString &port, const QString &protocol);
     bool removePort(const QString &zone, const QString &port, const QString &protocol);
     bool addRichRule(const QString &zone, const QString &rule);
