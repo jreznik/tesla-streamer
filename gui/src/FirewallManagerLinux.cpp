@@ -17,33 +17,30 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 
 bool FirewallManagerLinux::configureFirewall() {
     emit messageLogged("Detecting firewall backend...");
-    
     bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
     
     if (hasFirewallD) {
-        emit messageLogged("Using firewalld D-Bus for redirection...");
+        emit messageLogged("Using firewalld D-Bus...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
-        
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
         
-        QStringList zonesToConfigure;
+        QStringList zones;
         if (reply.type() != QDBusMessage::ErrorMessage) {
             const QDBusArgument arg = reply.arguments().at(0).value<QDBusArgument>();
             QMap<QString, QStringList> activeZones;
             arg >> activeZones;
-            zonesToConfigure = activeZones.keys();
+            zones = activeZones.keys();
         }
-
-        if (zonesToConfigure.isEmpty()) {
+        if (zones.isEmpty()) {
             QDBusReply<QString> defaultZone = fw.call("getDefaultZone");
-            if (defaultZone.isValid()) zonesToConfigure << defaultZone.value();
+            if (defaultZone.isValid()) zones << defaultZone.value();
         }
+        if (!zones.contains("nm-shared")) zones << "nm-shared";
+        if (!zones.contains("public")) zones << "public";
 
-        if (!zonesToConfigure.contains("nm-shared")) zonesToConfigure << "nm-shared";
-        if (!zonesToConfigure.contains("public")) zonesToConfigure << "public";
-
-        for (const QString &zoneName : zonesToConfigure) {
+        for (const QString &zoneName : zones) {
+            emit messageLogged("Enabling redirection in zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
             addPort(zoneName, "5353", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
@@ -51,24 +48,25 @@ bool FirewallManagerLinux::configureFirewall() {
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             fw.call("addMasquerade", zoneName, 0);
         }
-        emit messageLogged("SUCCESS: firewalld rules applied.");
         return true;
     } else {
-        emit messageLogged("firewalld not found. Falling back to iptables...");
-        // Redirection for packets entering the Steam Deck
+        emit messageLogged("firewalld not found. FALLING BACK TO IPTABLES (STREAMS/STEAMDECK)...");
         bool ok = true;
+        // Interception Rules
         ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
         ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         
-        // Ensure packets can reach the local machine
+        // ACCEPT Rules
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
 
+        // DEBUG LOGGING Rules (See with 'dmesg -w')
+        runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "LOG", "--log-prefix", "[TESLA-DNS] "});
+        runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "LOG", "--log-prefix", "[TESLA-HTTP] "});
+
         if (ok) {
-            emit messageLogged("SUCCESS: iptables redirection active.");
-        } else {
-            emit messageLogged("ERROR: Failed to apply iptables rules. Ensure sudo access.");
+            emit messageLogged("SUCCESS: iptables redirection active. Monitor with 'dmesg -w | grep TESLA'");
         }
         return ok;
     }
@@ -76,12 +74,10 @@ bool FirewallManagerLinux::configureFirewall() {
 
 bool FirewallManagerLinux::cleanupFirewall() {
     emit messageLogged("Cleaning up firewall...");
-    
     if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
-        
         QStringList zones;
         if (reply.type() != QDBusMessage::ErrorMessage) {
             const QDBusArgument arg = reply.arguments().at(0).value<QDBusArgument>();
@@ -101,14 +97,14 @@ bool FirewallManagerLinux::cleanupFirewall() {
             fw.call("removeMasquerade", zoneName);
         }
     } else {
-        // Cleanup iptables
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "LOG", "--log-prefix", "[TESLA-DNS] "});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "LOG", "--log-prefix", "[TESLA-HTTP] "});
     }
-
     emit messageLogged("Firewall cleaned.");
     return true;
 }
