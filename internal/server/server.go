@@ -68,60 +68,61 @@ func (s *Server) Start() error {
 		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, host, path, ua)
 		os.Stdout.Sync()
 
-		// 1. Identify Background System Services
+		// --- STEP 1: FORCE STANDARD ONLINE HEADERS ---
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("Connection", "close")
+
+		// --- STEP 2: IDENTIFY PROBE TYPE ---
 		isSystem := strings.Contains(ua, "Dalvik") || 
 			strings.Contains(ua, "CaptivePortal") || 
 			strings.Contains(ua, "NetworkCheck") ||
 			ua == ""
 
-		// 2. Identify Connectivity Probes by Path
 		isProbePath := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
 			strings.Contains(path, "check_network_status") ||
 			strings.Contains(path, "success.txt") ||
 			strings.Contains(path, "ncsi.txt") ||
 			strings.Contains(path, "connecttest") ||
-			strings.Contains(path, "hotspot-detect")
+			strings.Contains(path, "hotspot-detect") ||
+			strings.Contains(path, "success.html")
 
-		// 3. Force Standard Online Responses
-		// Set headers first
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Header().Set("Connection", "close")
-		w.Header().Set("X-Android-Response", "204")
+		// --- STEP 3: SATISFY PROBES ---
+		
+		// A. Microsoft / Android NCSI (Magic String)
+		if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
+			log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK")
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Microsoft Connect Test"))
+			return
+		}
 
-		if isSystem || isProbePath {
-			// A. Microsoft NCSI Specific String
-			if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
-				log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK")
-				w.Header().Set("Content-Type", "text/plain")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("Microsoft Connect Test"))
-				return
-			}
+		// B. Apple Success (Specific HTML)
+		if strings.Contains(path, "hotspot-detect.html") || strings.Contains(path, "success.html") {
+			log.Printf("!!! SATISFYING APPLE PROBE !!! -> 200 OK")
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
+			return
+		}
 
-			// B. Apple Success Specific HTML
-			if strings.Contains(path, "hotspot-detect.html") {
-				log.Printf("!!! SATISFYING APPLE PROBE !!! -> 200 OK")
-				w.Header().Set("Content-Type", "text/html")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
-				return
-			}
-
-			// C. Universal 204 No Content for all other background probes
+		// C. Google / Android / Tesla (Zero-Byte 204)
+		if isProbePath || (isSystem && path == "/") {
 			log.Printf("!!! SATISFYING CONNECTIVITY CHECK !!! -> 204 No Content")
+			w.Header().Set("X-Android-Response", "204")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// 4. Intentional App Access
-		// Serve actual app for real browsers or intentional IP/Domain access
+		// --- STEP 4: INTENTIONAL APP ACCESS ---
 		isBrowser := strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") || strings.Contains(ua, "Safari")
 		isTargetHost := host == "10.42.0.1" || host == "10.42.0.1:8080" || strings.Contains(host, "tesla.stream")
 
 		if isBrowser && isTargetHost {
+			// Serve the actual app
 			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
@@ -130,13 +131,16 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// 5. Catch-all for hijacked domains (Greedy 204)
-		// Convince background services that they hit the internet.
+		// --- STEP 5: GREEDY HIJACK (FORCED SUCCESS) ---
+		// If they hit us on any other domain, return 204 to convince the device the "internet is up".
 		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", host)
+		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	log.Printf("--------------------------------------------------")
 	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
+	log.Printf("--------------------------------------------------")
 	os.Stdout.Sync()
 
 	ln, err := net.Listen("tcp", s.addr)
