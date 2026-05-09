@@ -1,19 +1,3 @@
-// Tesla Streamer - High-performance screen streaming for Tesla browsers
-// Copyright (C) 2026 Jaroslav Reznik
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 package main
 
 import (
@@ -40,6 +24,12 @@ var (
 )
 
 func main() {
+	// Massive unbuffered banner to prove execution
+	fmt.Println("##################################################")
+	fmt.Println("!!! TESLA STREAMER BACKEND BOOTING UP !!!")
+	fmt.Println("##################################################")
+	os.Stdout.Sync()
+
 	var rootCmd = &cobra.Command{
 		Use:   "tesla-streamer",
 		Short: "Tesla Streamer - High performance screen streaming for Tesla browsers",
@@ -55,12 +45,13 @@ func main() {
 	viper.BindPFlags(rootCmd.Flags())
 
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal(err)
+		fmt.Printf("FATAL EXECUTION ERROR: %v\n", err)
+		os.Exit(1)
 	}
 }
 
 func run(cmd *cobra.Command, args []string) {
-	fmt.Println("!!! BACKEND KICKSTART SUCCESSFUL !!!")
+	fmt.Println("!!! RUNNING CORE ENGINE !!!")
 	os.Stdout.Sync()
 
 	conf, err := config.LoadConfig()
@@ -70,11 +61,10 @@ func run(cmd *cobra.Command, args []string) {
 
 	srv := server.NewServer(addr)
 
-	// Start DNS Spoofer for offline mode
-	// Note: requires root to bind port 53. If it fails, we log it and continue.
+	// Start DNS Spoofer for offline mode on port 5353
 	dns := server.NewDNSSpoofer("10.42.0.1")
 	if err := dns.Start(); err != nil {
-		log.Printf("Warning: Could not start DNS Spoofer (port 53): %v. Offline mode may be limited.", err)
+		log.Printf("Warning: Could not start DNS Spoofer: %v", err)
 	}
 
 	// Create WebRTC manager
@@ -118,18 +108,14 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		// Update backend capture config
 		newConf := capture.Config{
 			Profile:    req.Profile,
 			Resolution: req.Resolution,
 			Bitrate:    req.Bitrate,
 			Encoder:    viper.GetString("encoder"),
 		}
-		
-		// Apply defaults for the chosen profile (handles 10000 bitrate for quality)
 		config.ApplyProfileDefaults(&newConf)
 		
-		// Manual overrides if sent from GUI (non-zero/empty)
 		if req.Resolution != "" {
 			newConf.Resolution = req.Resolution
 		}
@@ -139,7 +125,6 @@ func run(cmd *cobra.Command, args []string) {
 
 		captureMgr.UpdateConfig(newConf)
 
-		// Forward display and stats commands to web app via WebSocket
 		if req.Display != "" {
 			srv.SendMessage(map[string]interface{}{
 				"type": "display_config",
@@ -167,36 +152,24 @@ func run(cmd *cobra.Command, args []string) {
 		for msg := range srv.Messages() {
 			var m map[string]interface{}
 			if err := json.Unmarshal(msg, &m); err != nil {
-				log.Printf("Failed to unmarshal signaling message: %v", err)
 				continue
 			}
 
 			switch m["type"] {
 			case "offer":
-				log.Println("Received WebRTC offer from client")
-				
-				// Reset capture to ensure fresh headers for the new connection
 				captureMgr.Reset()
-
 				sdp := m["sdp"].(string)
 				answerSDP, err := rtc.HandleOffer(sdp)
 				if err != nil {
-					log.Printf("Failed to handle WebRTC offer: %v", err)
 					continue
 				}
-				log.Println("Sending WebRTC answer to client")
 				srv.SendMessage(map[string]interface{}{
 					"type": "answer",
 					"sdp":  answerSDP,
 				})
 			case "candidate":
-				log.Println("Received ICE candidate from client")
 				candidateJSON, _ := json.Marshal(m["candidate"])
-				if err := rtc.AddICECandidate(string(candidateJSON)); err != nil {
-					log.Printf("Failed to add ICE candidate: %v", err)
-				}
-			default:
-				log.Printf("Unknown signaling message type: %s", m["type"])
+				rtc.AddICECandidate(string(candidateJSON))
 			}
 		}
 	}()
@@ -208,7 +181,6 @@ func run(cmd *cobra.Command, args []string) {
 	// Start capture initially
 	captureMgr.Start()
 
-	log.Println("Server is running. Control API active on /api/reselect")
 	<-sig
 	log.Println("Shutting down...")
 	captureMgr.Stop()
