@@ -3,6 +3,8 @@ tesla-streamer
 gui/build/
 build-dir/
 .flatpak-builder/
+repo/
+TeslaStreamer.flatpak
 
 # Dependencies
 vendor/

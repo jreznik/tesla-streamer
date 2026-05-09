@@ -1,19 +1,3 @@
-// Tesla Streamer - High-performance screen streaming for Tesla browsers
-// Copyright (C) 2026 Jaroslav Reznik
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 #include "MainWindow.h"
 #include "NetworkManagerLinux.h"
 #include <QCoreApplication>
@@ -22,6 +6,7 @@
 #include <QFile>
 #include <QNetworkRequest>
 #include <QDesktopServices>
+#include <QNetworkInterface>
 #include <QUrl>
 #include <QJsonObject>
 #include <QJsonDocument>
@@ -54,10 +39,9 @@ void MainWindow::setupUI() {
     QVBoxLayout *mainLayout = new QVBoxLayout(central);
     mainLayout->setSpacing(10);
     mainLayout->setContentsMargins(15, 15, 15, 15);
-    // Force window to follow the size of the contents exactly
     mainLayout->setSizeConstraint(QLayout::SetFixedSize);
 
-    // --- Row 1: Streaming Configuration (Horizontal) ---
+    // --- Row 1: Streaming Configuration ---
     m_settingsGroup = new QGroupBox("Streaming Configuration", this);
     QHBoxLayout *settingsLayout = new QHBoxLayout(m_settingsGroup);
     settingsLayout->setSpacing(15);
@@ -82,7 +66,26 @@ void MainWindow::setupUI() {
     connect(m_statsCheckbox, &QCheckBox::stateChanged, this, &MainWindow::updateConfig);
     mainLayout->addWidget(m_settingsGroup);
 
-    // --- Row 2: Action Buttons (Horizontal) ---
+    // --- Row 2: Network Section ---
+    m_networkGroup = new QGroupBox("Network / Tesla Mode", this);
+    QHBoxLayout *networkLayout = new QHBoxLayout(m_networkGroup);
+    networkLayout->setSpacing(15);
+
+    networkLayout->addWidget(new QLabel("Device:"));
+    m_hotspotDeviceCombo = new QComboBox();
+    m_hotspotDeviceCombo->addItems(m_netManager->getAvailableInterfaces());
+    m_hotspotDeviceCombo->setMinimumWidth(100);
+    networkLayout->addWidget(m_hotspotDeviceCombo);
+
+    m_hotspotBtn = new QPushButton("Start Hotspot");
+    m_hotspotBtn->setFixedHeight(35);
+    m_hotspotBtn->setMinimumWidth(120);
+    networkLayout->addWidget(m_hotspotBtn);
+    connect(m_hotspotBtn, &QPushButton::clicked, this, &MainWindow::toggleHotspot);
+
+    mainLayout->addWidget(m_networkGroup);
+
+    // --- Row 3: Action Buttons ---
     QHBoxLayout *actionLayout = new QHBoxLayout();
     actionLayout->setSpacing(10);
 
@@ -92,12 +95,6 @@ void MainWindow::setupUI() {
     actionLayout->addWidget(m_startBtn);
     connect(m_startBtn, &QPushButton::clicked, this, &MainWindow::toggleServer);
 
-    m_hotspotBtn = new QPushButton("Start Hotspot");
-    m_hotspotBtn->setFixedHeight(35);
-    m_hotspotBtn->setMinimumWidth(120);
-    actionLayout->addWidget(m_hotspotBtn);
-    connect(m_hotspotBtn, &QPushButton::clicked, this, &MainWindow::toggleHotspot);
-
     m_reselectBtn = new QPushButton("Reselect Source");
     m_reselectBtn->setFixedHeight(35);
     m_reselectBtn->setEnabled(false);
@@ -106,7 +103,7 @@ void MainWindow::setupUI() {
 
     mainLayout->addLayout(actionLayout);
 
-    // --- Row 3: Status Information ---
+    // --- Row 4: Status Information ---
     m_controlGroup = new QGroupBox("Status", this);
     QVBoxLayout *statusLayout = new QVBoxLayout(m_controlGroup);
 
@@ -125,18 +122,19 @@ void MainWindow::setupUI() {
     m_openBrowserBtn->setStyleSheet("color: blue; text-decoration: underline;");
     statusHeader->addWidget(m_openBrowserBtn);
     connect(m_openBrowserBtn, &QPushButton::clicked, [this]() {
-        QDesktopServices::openUrl(QUrl("http://localhost:8080"));
+        QDesktopServices::openUrl(QUrl(m_urlLabel->text().remove("Connect at: ").remove("<b>").remove("</b>")));
     });
     statusHeader->addStretch();
     statusLayout->addLayout(statusHeader);
 
-    m_hotspotInfoLabel = new QLabel("Wi-Fi: <b>TeslaStreamer</b> (pw: <b>tesla123</b>)");
+    m_hotspotInfoLabel = new QLabel("Connect Tesla to: <b>TeslaStreamer</b> (pw: <b>tesla123</b>)<br/><i>Internet Routing: <b>ACTIVE</b></i>");
     m_hotspotInfoLabel->setVisible(false);
+    m_hotspotInfoLabel->setAlignment(Qt::AlignCenter);
     statusLayout->addWidget(m_hotspotInfoLabel);
     
     mainLayout->addWidget(m_controlGroup);
 
-    // --- Row 4: Log Toggle and Area ---
+    // --- Row 5: Log Section ---
     QHBoxLayout *logToggleLayout = new QHBoxLayout();
     logToggleLayout->addStretch();
     m_toggleLogsBtn = new QPushButton("Show Logs");
@@ -191,7 +189,8 @@ void MainWindow::toggleHotspot() {
         m_netManager->stopHotspot();
     } else {
         m_logArea->append("Requesting Hotspot start...");
-        if (!m_netManager->startHotspot("TeslaStreamer", "tesla123")) {
+        QString iface = m_hotspotDeviceCombo->currentText();
+        if (!m_netManager->startHotspot("TeslaStreamer", "tesla123", iface)) {
             m_logArea->append("ERROR: Failed to initiate hotspot startup");
         }
     }
@@ -206,12 +205,19 @@ void MainWindow::toggleLogs() {
 void MainWindow::onHotspotStateChanged(bool active) {
     if (active) {
         m_hotspotBtn->setText("Stop Hotspot");
+        m_hotspotDeviceCombo->setEnabled(false);
         m_hotspotInfoLabel->setVisible(true);
-        m_urlLabel->setText("http://play.tesla.stream:8080");
+        m_urlLabel->setText(QString("Connect at: <b>%1</b>").arg(m_netManager->getHotspotUrl()));
+        m_urlLabel->setVisible(true);
+        m_openBrowserBtn->setVisible(true);
     } else {
         m_hotspotBtn->setText("Start Hotspot");
+        m_hotspotDeviceCombo->setEnabled(true);
         m_hotspotInfoLabel->setVisible(false);
-        m_urlLabel->setText("http://localhost:8080");
+        m_urlLabel->setText("Connect at: <b>http://localhost:8080</b>");
+        // Refresh interface list
+        m_hotspotDeviceCombo->clear();
+        m_hotspotDeviceCombo->addItems(m_netManager->getAvailableInterfaces());
     }
 }
 
@@ -251,6 +257,18 @@ void MainWindow::startServer() {
         m_startBtn->setText("Stop Server");
         m_statusLabel->setText("Server: <b>Running</b>");
         m_reselectBtn->setEnabled(true);
+        
+        // Find local IP address
+        QString localIp = "localhost";
+        const QList<QHostAddress> list = QNetworkInterface::allAddresses();
+        for (const QHostAddress &address : list) {
+            if (address != QHostAddress::LocalHost && address.toIPv4Address()) {
+                localIp = address.toString();
+                break;
+            }
+        }
+
+        m_urlLabel->setText(QString("Connect at: <b>http://%1:8080</b>").arg(localIp));
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
         

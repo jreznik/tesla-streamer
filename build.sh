@@ -121,7 +121,10 @@ if [ "$BUILD_FLATPAK" = true ]; then
     fi
     
     # Ensure vendor directory is up to date for Flatpak build
+    # We must remove build-dir and .flatpak-builder first, otherwise go mod vendor
+    # will try to scan the Go SDK inside them and fail.
     echo "Syncing vendor directory..."
+    rm -rf build-dir .flatpak-builder
     go mod vendor
     
     flatpak-builder --force-clean --repo=repo build-dir io.github.jreznik.TeslaStreamer.yaml

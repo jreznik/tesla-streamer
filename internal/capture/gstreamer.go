@@ -36,13 +36,27 @@ type GStreamerPipeline struct {
 func NewGStreamerPipeline(nodeID uint32, track *webrtc.TrackLocalStaticSample, config Config) (*GStreamerPipeline, error) {
 	gst.Init(nil)
 
-	// Build pipeline string based on config
+	// Determine best encoder
 	encoder := "x264enc"
 	encoderParams := fmt.Sprintf("tune=zerolatency bitrate=%d speed-preset=ultrafast key-int-max=30", config.Bitrate)
+
+	registry := gst.GetRegistry()
 	
-	if config.Encoder == "vaapi" {
+	if feature, _ := registry.LookupFeature("vaapih264enc"); feature != nil {
+		log.Println("Tier 1 Encoder: Hardware acceleration found (vaapih264enc)")
 		encoder = "vaapih264enc"
-		encoderParams = fmt.Sprintf("bitrate=%d", config.Bitrate) 
+		encoderParams = fmt.Sprintf("bitrate=%d", config.Bitrate)
+	} else if feature, _ := registry.LookupFeature("x264enc"); feature != nil {
+		log.Println("Tier 2 Encoder: High-quality software encoder found (x264enc)")
+		encoder = "x264enc"
+		// encoderParams already set to x264 defaults above
+	} else if feature, _ := registry.LookupFeature("openh264enc"); feature != nil {
+		log.Println("Tier 3 Encoder: Standard software encoder found (openh264enc)")
+		encoder = "openh264enc"
+		// usage-type 1 = screen
+		encoderParams = fmt.Sprintf("bitrate=%d usage-type=screen", config.Bitrate * 1000) // openh264 uses bps
+	} else {
+		log.Println("CRITICAL: No H.264 encoder found in GStreamer registry!")
 	}
 
 	scale := ""
@@ -79,10 +93,18 @@ func NewGStreamerPipeline(nodeID uint32, track *webrtc.TrackLocalStaticSample, c
 		switch msg.Type() {
 		case gst.MessageError:
 			err := msg.ParseError()
-			log.Printf("GStreamer ERROR: %s", err.Error())
+			src := "unknown"
+			if msg.Source() != "" {
+				src = msg.Source()
+			}
+			log.Printf("GStreamer ERROR from %s: %s", src, err.Error())
 		case gst.MessageWarning:
 			err := msg.ParseInfo()
-			log.Printf("GStreamer WARNING: %s", err.Error())
+			src := "unknown"
+			if msg.Source() != "" {
+				src = msg.Source()
+			}
+			log.Printf("GStreamer WARNING from %s: %s", src, err.Error())
 		}
 		return true
 	})

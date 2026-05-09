@@ -26,11 +26,12 @@ class INetworkManager : public QObject {
 public:
     virtual ~INetworkManager() {}
 
-    virtual bool startHotspot(const QString &ssid, const QString &password) = 0;
+    virtual bool startHotspot(const QString &ssid, const QString &password, const QString &interface = "") = 0;
     virtual void stopHotspot() = 0;
     virtual bool isHotspotActive() const = 0;
     virtual QString getHotspotUrl() const = 0;
     virtual QString getStatusMessage() const = 0;
+    virtual QStringList getAvailableInterfaces() const = 0;
 
 signals:
     void hotspotStateChanged(bool active);

@@ -47,6 +47,20 @@ func NewServer(addr string) *Server {
 func (s *Server) Start() error {
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", s.handleWebSocket)
+	
+	// Connectivity check handlers for Tesla/Chromium
+	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Connectivity check from %s: %s", r.RemoteAddr, r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}
+	
+	http.HandleFunc("/generate_204", connectivityHandler)
+	http.HandleFunc("/gen_204", connectivityHandler)
+	http.HandleFunc("/check_network_status", connectivityHandler)
+	http.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("Microsoft Connect Test"))
+	})
 
 	log.Printf("Starting server on %s", s.addr)
 	return http.ListenAndServe(s.addr, nil)

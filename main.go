@@ -66,6 +66,13 @@ func run(cmd *cobra.Command, args []string) {
 
 	srv := server.NewServer(addr)
 
+	// Start DNS Spoofer for offline mode
+	// Note: requires root to bind port 53. If it fails, we log it and continue.
+	dns := server.NewDNSSpoofer("10.42.0.1")
+	if err := dns.Start(); err != nil {
+		log.Printf("Warning: Could not start DNS Spoofer (port 53): %v. Offline mode may be limited.", err)
+	}
+
 	// Create WebRTC manager
 	rtc, err := webrtc_manager.NewWebRTCManager(func(candidate *webrtc.ICECandidate) {
 		srv.SendMessage(map[string]interface{}{

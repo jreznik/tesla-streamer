@@ -56,6 +56,20 @@ A native Decky Loader plugin is available in the `decky-plugin/` directory.
 5. In your Tesla browser, navigate to the URL shown in the GUI (e.g., `http://play.tesla.stream:8080`).
 6. Click **LAUNCH STREAM** on the web page.
 
+## Firewall Configuration (firewalld)
+If you are using `firewalld` (default on Fedora), you need to open the following ports to allow the Tesla to connect:
+
+```bash
+# Open signaling and web server port
+sudo firewall-cmd --add-port=8080/tcp --permanent
+# Open DNS port for offline spoofing
+sudo firewall-cmd --add-port=53/udp --permanent
+# Open WebRTC media ports
+sudo firewall-cmd --add-port=49152-65535/udp --permanent
+# Reload firewall
+sudo firewall-cmd --reload
+```
+
 ## Credits & Author
 
 - **Author:** Jaroslav Reznik
