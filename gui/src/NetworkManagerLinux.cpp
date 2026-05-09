@@ -80,8 +80,6 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
         return false;
     }
 
-    emit messageLogged("Activating Hotspot on " + interface + "...");
-    
     QVariantMap connection;
     connection["id"] = ssid;
     connection["uuid"] = QUuid::createUuid().toString().remove('{').remove('}');
@@ -100,6 +98,11 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
 
     QVariantMap ipv4;
     ipv4["method"] = "shared";
+    
+    // Attempt to point DNS to ourselves
+    QList<uint> dnsList;
+    dnsList << 0x01002a0a; // 10.42.0.1 in network byte order
+    ipv4["dns"] = QVariant::fromValue(dnsList);
 
     QVariantMap ipv6;
     ipv6["method"] = "ignore";
@@ -111,13 +114,27 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
     settings["ipv4"] = ipv4;
     settings["ipv6"] = ipv6;
 
+    emit messageLogged("Activating Hotspot on " + (interface.isEmpty() ? "default device" : interface) + "...");
+    
     QDBusMessage msg = QDBusMessage::createMethodCall(NM_SERVICE, NM_PATH, NM_SERVICE, "AddAndActivateConnection");
     msg << QVariant::fromValue(settings) << QDBusObjectPath(wifiDevicePath) << QDBusObjectPath("/");
     
     QDBusMessage reply = QDBusConnection::systemBus().call(msg);
     if (reply.type() == QDBusMessage::ErrorMessage) {
         emit messageLogged("ERROR: Failed to activate hotspot: " + reply.errorMessage());
-        return false;
+        if (reply.errorMessage().contains("ipv4.dns")) {
+            emit messageLogged("Retrying without custom DNS...");
+            settings["ipv4"].remove("dns");
+            msg = QDBusMessage::createMethodCall(NM_SERVICE, NM_PATH, NM_SERVICE, "AddAndActivateConnection");
+            msg << QVariant::fromValue(settings) << QDBusObjectPath(wifiDevicePath) << QDBusObjectPath("/");
+            reply = QDBusConnection::systemBus().call(msg);
+            if (reply.type() == QDBusMessage::ErrorMessage) {
+                emit messageLogged("Still failed: " + reply.errorMessage());
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
     m_connectionPath = reply.arguments().at(0).value<QDBusObjectPath>().path();
@@ -126,16 +143,18 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
     m_active = true;
     m_status = "Hotspot Active";
     emit hotspotStateChanged(true);
-    emit messageLogged("SUCCESS: Hotspot visible as '" + ssid + "'");
+    emit messageLogged("SUCCESS: Hotspot visible. Diagnostics active.");
     return true;
 }
 
 void NetworkManagerLinux::stopHotspot() {
     if (!m_active) return;
     
+    emit messageLogged("Deactivating hotspot...");
     QDBusInterface nm(NM_SERVICE, NM_PATH, NM_SERVICE, QDBusConnection::systemBus());
     nm.call("DeactivateConnection", QDBusObjectPath(m_activeConnectionPath));
     
+    emit messageLogged("Removing temporary profile...");
     QDBusInterface conn(NM_SERVICE, m_connectionPath, "org.freedesktop.NetworkManager.Settings.Connection", QDBusConnection::systemBus());
     conn.call("Delete");
     
@@ -149,7 +168,7 @@ bool NetworkManagerLinux::isHotspotActive() const {
 }
 
 QString NetworkManagerLinux::getHotspotUrl() const {
-    return "http://10.42.0.1.nip.io:8080";
+    return "http://10.42.0.1:8080";
 }
 
 QString NetworkManagerLinux::getStatusMessage() const {

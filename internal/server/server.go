@@ -1,19 +1,3 @@
-// Tesla Streamer - High-performance screen streaming for Tesla browsers
-// Copyright (C) 2026 Jaroslav Reznik
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 package server
 
 import (
@@ -25,118 +9,136 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 type Server struct {
-	addr string
-	// Simplified signaling: one peer for now
-	mu         sync.Mutex
-	peerConn   *websocket.Conn
-	msgChannel chan []byte
+	addr     string
+	upgrader websocket.Upgrader
+	clients  map[*websocket.Conn]bool
+	mu       sync.Mutex
+	msgChan  chan []byte
+	handlers map[string]http.HandlerFunc
 }
 
 func NewServer(addr string) *Server {
 	return &Server{
-		addr:       addr,
-		msgChannel: make(chan []byte, 100),
+		addr: addr,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		},
+		clients:  make(map[*websocket.Conn]bool),
+		msgChan:  make(chan []byte, 100),
+		handlers: make(map[string]http.HandlerFunc),
 	}
 }
 
+func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
+	s.handlers[pattern] = handler
+}
+
 func (s *Server) Start() error {
-	http.Handle("/", http.FileServer(http.Dir("./static")))
-	http.HandleFunc("/ws", s.handleWebSocket)
+	// Global logger middleware
+	logger := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("HTTP REQUEST: %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	mux := http.NewServeMux()
+
+	// Static files
+	mux.Handle("/", http.FileServer(http.Dir("./static")))
+	
+	// WebSocket
+	mux.HandleFunc("/ws", s.handleWebSocket)
 	
 	// Connectivity check handlers for Tesla/Chromium/Android/Apple
 	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Captive Portal check from %s: %s %s", r.RemoteAddr, r.Host, r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}
 	
 	// Google / Android / Chrome
-	http.HandleFunc("/generate_204", connectivityHandler)
-	http.HandleFunc("/gen_204", connectivityHandler)
+	mux.HandleFunc("/generate_204", connectivityHandler)
+	mux.HandleFunc("/gen_204", connectivityHandler)
 	// Gnome / Linux
-	http.HandleFunc("/check_network_status", connectivityHandler)
+	mux.HandleFunc("/check_network_status", connectivityHandler)
 	// Microsoft
-	http.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("MS Connect test from %s", r.RemoteAddr)
+	mux.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("Microsoft Connect Test"))
 	})
 	// Apple
-	http.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Apple Hotspot check from %s", r.RemoteAddr)
+	mux.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
 	})
 	// Catch all for any common portal paths
-	http.HandleFunc("/success.txt", connectivityHandler)
-	http.HandleFunc("/ncsi.txt", connectivityHandler)
+	mux.HandleFunc("/success.txt", connectivityHandler)
+	mux.HandleFunc("/ncsi.txt", connectivityHandler)
+	
+	// Internal Ping for testing
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("PONG - Server is reachable"))
+	})
+
+	// Register API handlers from main
+	for pattern, handler := range s.handlers {
+		mux.HandleFunc(pattern, handler)
+	}
 
 	log.Printf("Starting server on %s", s.addr)
-	return http.ListenAndServe(s.addr, nil)
-}
-
-// HandleFunc registers a new route to the server's multiplexer
-func (s *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	http.HandleFunc(pattern, handler)
+	server := &http.Server{
+		Addr:    s.addr,
+		Handler: logger(mux),
+	}
+	return server.ListenAndServe()
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade to websocket: %v", err)
+		log.Printf("WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	s.mu.Lock()
+	s.clients[conn] = true
+	s.mu.Unlock()
+
+	log.Printf("New client connected: %s", r.RemoteAddr)
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			s.mu.Lock()
+			delete(s.clients, conn)
+			s.mu.Unlock()
+			log.Printf("Client disconnected: %v", err)
+			break
+		}
+		s.msgChan <- msg
+	}
+}
+
+func (s *Server) SendMessage(msg interface{}) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Failed to marshal message: %v", err)
 		return
 	}
 
 	s.mu.Lock()
-	if s.peerConn != nil {
-		s.peerConn.Close()
-	}
-	s.peerConn = conn
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		if s.peerConn == conn {
-			s.peerConn = nil
-		}
-		s.mu.Unlock()
-		conn.Close()
-	}()
-
-	log.Println("New client connected via WebSocket")
-
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("WebSocket read error: %v", err)
-			break
-		}
-		s.msgChannel <- message
-	}
-}
-
-// SendMessage sends a message to the connected peer
-func (s *Server) SendMessage(msg interface{}) error {
-	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.peerConn == nil {
-		return nil // No client connected
+	for client := range s.clients {
+		if err := client.WriteMessage(websocket.TextMessage, data); err != nil {
+			log.Printf("Failed to send message: %v", err)
+			client.Close()
+			delete(s.clients, client)
+		}
 	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	return s.peerConn.WriteMessage(websocket.TextMessage, data)
 }
 
-// Messages returns the channel for incoming signaling messages
 func (s *Server) Messages() <-chan []byte {
-	return s.msgChannel
+	return s.msgChan
 }
