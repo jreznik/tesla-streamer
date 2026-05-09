@@ -16,10 +16,12 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 }
 
 bool FirewallManagerLinux::configureFirewall() {
-    emit messageLogged("Enabling Captive Portal Redirection...");
+    emit messageLogged("Enabling Hardened Redirection (Kernel-Level)...");
     
-    if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
-        emit messageLogged("Using firewalld D-Bus...");
+    bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
+    
+    if (hasFirewallD) {
+        emit messageLogged("Using firewalld D-Bus Redirects...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
@@ -35,39 +37,45 @@ bool FirewallManagerLinux::configureFirewall() {
         if (!zones.contains("public")) zones << "public";
 
         for (const QString &zoneName : zones) {
-            emit messageLogged("Configuring redirects in zone: " + zoneName);
+            emit messageLogged("Configuring zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
             addPort(zoneName, "5354", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
             
-            // Redirect 53 -> 5354
+            // Redirect 53 -> 5354 (DNS)
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
-            // Redirect 80 -> 8080
+            // Redirect 80 -> 8080 (HTTP)
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+            // Reject 443 to force HTTP fallback
+            addRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
             
             fw.call("addMasquerade", zoneName, 0);
         }
         return true;
     } else {
-        emit messageLogged("firewalld not found. Using iptables REDIRECT targets...");
+        emit messageLogged("Using iptables REDIRECT targets (Hardened)...");
         bool ok = true;
-        // Intercept DNS (53 -> 5354)
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
-        // Intercept HTTP (80 -> 8080)
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
-        
-        // ACCEPT Rules
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+        QString iface = "wlp114s0f0";
 
-        if (ok) emit messageLogged("SUCCESS: iptables redirects active.");
+        // REDIRECT Interception
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        
+        // REJECT HTTPS (port 443) to force fallback to HTTP (port 80)
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
+
+        // ACCEPT Rules
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+
+        if (ok) emit messageLogged("SUCCESS: Hardened iptables redirects active.");
         return ok;
     }
 }
 
 bool FirewallManagerLinux::cleanupFirewall() {
-    emit messageLogged("Cleaning up redirects...");
+    emit messageLogged("Cleaning up firewall...");
     if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
@@ -88,16 +96,19 @@ bool FirewallManagerLinux::cleanupFirewall() {
             removePort(zoneName, "49152-65535", "udp");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+            removeRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
             fw.call("removeMasquerade", zoneName);
         }
     } else {
-        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
-        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+        QString iface = "wlp114s0f0";
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
     }
-    emit messageLogged("Redirects removed.");
+    emit messageLogged("Firewall cleaned.");
     return true;
 }
 

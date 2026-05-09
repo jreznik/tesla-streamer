@@ -43,13 +43,15 @@ func (s *Server) Start() error {
 	for pattern, handler := range s.handlers {
 		mux.HandleFunc(pattern, handler)
 	}
+
 	fileServer := http.FileServer(http.Dir("./static"))
 	mux.Handle("/", fileServer)
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! HTTP ACCESS !!! %s %s %s", r.Method, r.Host, r.URL.Path)
+		log.Printf("!!! HTTP ACCESS !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
 		os.Stdout.Sync()
 
+		// 1. Is it a connectivity probe? (Android, Tesla, Apple)
 		path := r.URL.Path
 		isProbe := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
@@ -59,23 +61,27 @@ func (s *Server) Start() error {
 			strings.Contains(path, "success.txt")
 
 		if isProbe {
-			log.Printf("!!! SATISFYING PROBE !!! -> 204")
+			log.Printf("!!! SATISFYING CONNECTIVITY PROBE !!! -> 204")
+			os.Stdout.Sync()
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// If it's for our app directly, serve it
+		// 2. Is it for our app?
 		if r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream") {
 			mux.ServeHTTP(w, r)
 		} else {
-			// Redirect everything else to our local IP
-			log.Printf("!!! CAPTIVE PORTAL HIJACK !!! (%s) -> Redirecting to 10.42.0.1", r.Host)
-			http.Redirect(w, r, "http://10.42.0.1:8080/", http.StatusFound)
+			// 3. Greedy Hijack: Return 204 for everything else too. 
+			// This tells the device "the internet is here and working" for any domain it background-pings.
+			log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204", r.Host)
+			os.Stdout.Sync()
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.WriteHeader(http.StatusNoContent)
 		}
 	})
 
-	log.Printf("TESLA STREAMER BACKEND STARTING ON %s", s.addr)
+	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
 	os.Stdout.Sync()
 
 	return http.ListenAndServe(s.addr, mainHandler)
