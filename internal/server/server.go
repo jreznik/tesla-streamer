@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -38,19 +37,6 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 	s.handlers[pattern] = handler
 }
 
-type connLogger struct {
-	net.Listener
-}
-
-func (l *connLogger) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err == nil {
-		log.Printf("!!! RAW TCP CONNECTION !!! From: %s -> To: %s", c.RemoteAddr(), c.LocalAddr())
-		os.Stdout.Sync()
-	}
-	return c, err
-}
-
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -61,57 +47,67 @@ func (s *Server) Start() error {
 	fileServer := http.FileServer(http.Dir("./static"))
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("!!! HTTP ACCESS !!! %s %s %s from %s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
+		ua := r.Header.Get("User-Agent")
+		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, r.Host, r.URL.Path, ua)
 		os.Stdout.Sync()
 
-		// Priority 1: Check for known connectivity probes regardless of Host
+		// Anti-Cache Headers (Crucial for connectivity checks)
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
+
 		path := r.URL.Path
+
+		// 1. Specific string probes (Microsoft / Android NCSI)
+		if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
+			log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK 'Microsoft Connect Test'")
+			os.Stdout.Sync()
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte("Microsoft Connect Test"))
+			return
+		}
+
+		// 2. Connectivity Probes (Google / Android / Apple)
 		isProbe := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
 			strings.Contains(path, "check_network_status") ||
-			strings.Contains(path, "connecttest") ||
 			strings.Contains(path, "hotspot-detect") ||
 			strings.Contains(path, "success.txt") ||
-			strings.Contains(path, "ncsi.txt")
+			strings.Contains(path, "success.html")
 
 		if isProbe {
-			log.Printf("!!! SATISFYING CONNECTIVITY PROBE !!! -> 204")
+			log.Printf("!!! SATISFYING 204 PROBE !!! -> 204 No Content")
 			os.Stdout.Sync()
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Header().Set("X-Tesla-Streamer-Spoof", "true")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Priority 2: Serve the app if it's the right Host
+		// 3. Application Access (Intentional)
+		// We allow access via IP or our fake domain
 		if r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream") {
-			// Check if it's a root request to serve index.html
-			if r.URL.Path == "/" {
+			// Serve actual app
+			if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
 				// Static file fallback
 				fileServer.ServeHTTP(w, r)
 			}
-		} else {
-			// Priority 3: Greedy hijack for random domains
-			log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204", r.Host)
-			os.Stdout.Sync()
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.WriteHeader(http.StatusNoContent)
+			return
 		}
+
+		// 4. Greedy Hijack (Random Domains background pinging)
+		// If they hit us on a random domain (like www.google.com/), give them a 204.
+		// This convinces the background network service that the connection is "transparent".
+		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", r.Host)
+		os.Stdout.Sync()
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
 	os.Stdout.Sync()
 
-	// Wrap the listener to log raw connections
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-	loggedLn := &connLogger{ln}
-
-	return http.Serve(loggedLn, mainHandler)
+	return http.ListenAndServe(s.addr, mainHandler)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
