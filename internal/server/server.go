@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -39,26 +38,18 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 }
 
 func (s *Server) Start() error {
-	logger := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("!!! HTTP REQUEST !!! Method=%s Host=%s Path=%s Remote=%s", r.Method, r.Host, r.URL.Path, r.RemoteAddr)
-			for k, v := range r.Header {
-				log.Printf("  HEADER: %s = %v", k, v)
-			}
-			os.Stdout.Sync()
-			next.ServeHTTP(w, r)
-		})
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	for pattern, handler := range s.handlers {
 		mux.HandleFunc(pattern, handler)
 	}
-
 	fileServer := http.FileServer(http.Dir("./static"))
+	mux.Handle("/", fileServer)
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("!!! HTTP ACCESS !!! %s %s %s", r.Method, r.Host, r.URL.Path)
+		os.Stdout.Sync()
+
 		path := r.URL.Path
 		isProbe := strings.Contains(path, "generate_204") || 
 			strings.Contains(path, "gen_204") || 
@@ -68,40 +59,26 @@ func (s *Server) Start() error {
 			strings.Contains(path, "success.txt")
 
 		if isProbe {
-			log.Printf("!!! SATISFYING CONNECTIVITY PROBE !!! -> 204")
-			os.Stdout.Sync()
+			log.Printf("!!! SATISFYING PROBE !!! -> 204")
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
+		// If it's for our app directly, serve it
 		if r.Host == "10.42.0.1" || r.Host == "10.42.0.1:8080" || r.Host == "localhost:8080" || strings.Contains(r.Host, "tesla.stream") {
 			mux.ServeHTTP(w, r)
 		} else {
-			log.Printf("!!! HIJACKING RANDOM DOMAIN REQUEST (%s) !!! -> 204", r.Host)
-			os.Stdout.Sync()
-			w.WriteHeader(http.StatusNoContent)
+			// Redirect everything else to our local IP
+			log.Printf("!!! CAPTIVE PORTAL HIJACK !!! (%s) -> Redirecting to 10.42.0.1", r.Host)
+			http.Redirect(w, r, "http://10.42.0.1:8080/", http.StatusFound)
 		}
 	})
 
-	mux.Handle("/", fileServer)
-
-	// Listen on Port 80 AND the requested address
-	go func() {
-		log.Printf("Attempting to bind directly to Port 80 (Standard Web)...")
-		ln, err := net.Listen("tcp", ":80")
-		if err != nil {
-			log.Printf("!!! PORT 80 BIND ERROR !!!: %v (Use sudo setcap)", err)
-			return
-		}
-		log.Printf("SUCCESS: Server listening on Port 80")
-		os.Stdout.Sync()
-		http.Serve(ln, logger(mainHandler))
-	}()
-
-	log.Printf("Starting primary listener on %s", s.addr)
+	log.Printf("TESLA STREAMER BACKEND STARTING ON %s", s.addr)
 	os.Stdout.Sync()
-	return http.ListenAndServe(s.addr, logger(mainHandler))
+
+	return http.ListenAndServe(s.addr, mainHandler)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +92,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clients[conn] = true
 	s.mu.Unlock()
 
-	log.Printf("WEBSOCKET CONNECTED: %s", r.RemoteAddr)
+	log.Printf("NEW WEBSOCKET CLIENT: %s", r.RemoteAddr)
 	os.Stdout.Sync()
 
 	for {

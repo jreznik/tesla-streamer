@@ -18,8 +18,8 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Bind DIRECTLY to port 53 for maximum reliability
-	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:53")
+	// Listen on 5354 to avoid conflict with dnsmasq (53) and Avahi (5353)
+	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
 	if err != nil {
 		return err
 	}
@@ -27,7 +27,6 @@ func (s *DNSSpoofer) Start() error {
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		log.Printf("!!! DNS STARTUP ERROR !!!: %v", err)
-		log.Printf("HINT: Run 'sudo setcap cap_net_bind_service=+ep ./tesla-streamer'")
 		return err
 	}
 	s.conn = conn
@@ -62,7 +61,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("INCOMING DNS PROBE: %s [%s] from %s", name, question.Type.String(), addr.String())
+		log.Printf("INCOMING DNS PROBE: %s [%s]", name, question.Type.String())
 		os.Stdout.Sync()
 
 		msg.Response = true
@@ -76,7 +75,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 						Name:  question.Name,
 						Type:  dnsmessage.TypeA,
 						Class: dnsmessage.ClassINET,
-						TTL:   5,
+						TTL:   10,
 					},
 					Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
 				}
@@ -87,7 +86,6 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 		} else if question.Type == dnsmessage.TypeAAAA {
 			log.Printf("SPOOFING AAAA -> EMPTY (Force IPv4)")
 			os.Stdout.Sync()
-			// Return successful response with no answers to force IPv4 fallback
 		}
 	}
 
