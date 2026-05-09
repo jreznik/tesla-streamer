@@ -15,6 +15,8 @@ add_executable(tesla-streamer-gui
     src/MainWindow.cpp
     src/INetworkManager.cpp
     src/NetworkManagerLinux.cpp
+    src/IFirewallManager.cpp
+    src/FirewallManagerLinux.cpp
     resources.qrc
 )
 

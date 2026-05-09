@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "NetworkManagerLinux.h"
+#include "FirewallManagerLinux.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QIcon>
@@ -15,7 +16,8 @@
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), 
     m_process(new QProcess(this)), 
     m_networkManager(new QNetworkAccessManager(this)),
-    m_netManager(new NetworkManagerLinux(this)) 
+    m_netManager(new NetworkManagerLinux(this)),
+    m_fwManager(new FirewallManagerLinux(this))
 {
     setupUI();
     setupTray();
@@ -25,6 +27,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &MainWindow::handleControlReply);
     connect(m_netManager, &INetworkManager::hotspotStateChanged, this, &MainWindow::onHotspotStateChanged);
     connect(m_netManager, &INetworkManager::messageLogged, m_logArea, &QTextEdit::append);
+    connect(m_fwManager, &IFirewallManager::messageLogged, m_logArea, &QTextEdit::append);
 }
 
 MainWindow::~MainWindow() {
@@ -82,6 +85,11 @@ void MainWindow::setupUI() {
     m_hotspotBtn->setMinimumWidth(120);
     networkLayout->addWidget(m_hotspotBtn);
     connect(m_hotspotBtn, &QPushButton::clicked, this, &MainWindow::toggleHotspot);
+
+    m_fwBtn = new QPushButton("Fix Firewall");
+    m_fwBtn->setFixedHeight(35);
+    networkLayout->addWidget(m_fwBtn);
+    connect(m_fwBtn, &QPushButton::clicked, this, &MainWindow::configureFirewall);
 
     mainLayout->addWidget(m_networkGroup);
 
@@ -180,6 +188,8 @@ void MainWindow::toggleServer() {
     if (m_process->state() == QProcess::Running) {
         stopServer();
     } else {
+        // Automatically try to fix firewall when starting server
+        m_fwManager->configureFirewall();
         startServer();
     }
 }
@@ -200,6 +210,10 @@ void MainWindow::toggleLogs() {
     bool visible = m_logArea->isVisible();
     m_logArea->setVisible(!visible);
     m_toggleLogsBtn->setText(visible ? "Show Logs" : "Hide Logs");
+}
+
+void MainWindow::configureFirewall() {
+    m_fwManager->configureFirewall();
 }
 
 void MainWindow::onHotspotStateChanged(bool active) {

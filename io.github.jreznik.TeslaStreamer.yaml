@@ -38,8 +38,8 @@ modules:
       - cp -a . /app/lib/golang
     sources:
       - type: archive
-        url: https://go.dev/dl/go1.23.1.linux-amd64.tar.gz
-        sha256: 49bbb517cfa9eee677e1e7897f7cf9cfdbcf49e05f61984a2789136de359f9bd
+        url: https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+        sha256: 2852af0cb20a13139b3448992e69b868e50ed0f8a1e5940ee1de9e19a123b613
 
   - name: tesla-streamer-backend
     buildsystem: simple

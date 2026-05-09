@@ -101,6 +101,8 @@ if [ "$BUILD_BACKEND" = true ]; then
     export CGO_ENABLED=1
     go build -ldflags "-linkmode external -extldflags '-static-libgcc -static-libstdc++'" -o tesla-streamer .
     echo "Go backend built: ./tesla-streamer"
+    echo "NOTE: To enable the DNS spoofer (port 53), run:"
+    echo "sudo setcap 'cap_net_bind_service=+ep' ./tesla-streamer"
 fi
 
 if [ "$BUILD_GUI" = true ]; then
@@ -124,7 +126,8 @@ if [ "$BUILD_FLATPAK" = true ]; then
     # We must remove build-dir and .flatpak-builder first, otherwise go mod vendor
     # will try to scan the Go SDK inside them and fail.
     echo "Syncing vendor directory..."
-    rm -rf build-dir .flatpak-builder
+    rm -rf build-dir || true
+    rm -rf .flatpak-builder || true
     go mod vendor
     
     flatpak-builder --force-clean --repo=repo build-dir io.github.jreznik.TeslaStreamer.yaml

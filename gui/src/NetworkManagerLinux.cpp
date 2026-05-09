@@ -43,6 +43,29 @@ QStringList NetworkManagerLinux::getAvailableInterfaces() const {
 }
 
 bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &password, const QString &interface) {
+    emit messageLogged("Cleaning up old TeslaStreamer profiles...");
+    
+    QDBusInterface settingsInterface(NM_SERVICE, "/org/freedesktop/NetworkManager/Settings", "org.freedesktop.NetworkManager.Settings", QDBusConnection::systemBus());
+    QDBusReply<QList<QDBusObjectPath>> connections = settingsInterface.call("ListConnections");
+    
+    if (connections.isValid()) {
+        for (const auto &connPath : connections.value()) {
+            QDBusInterface conn(NM_SERVICE, connPath.path(), "org.freedesktop.NetworkManager.Settings.Connection", QDBusConnection::systemBus());
+            QDBusMessage reply = conn.call("GetSettings");
+            
+            if (reply.type() != QDBusMessage::ErrorMessage) {
+                const QDBusArgument arg = reply.arguments().at(0).value<QDBusArgument>();
+                QMap<QString, QVariantMap> settingsMap;
+                arg >> settingsMap;
+                
+                if (settingsMap.contains("connection") && settingsMap["connection"].value("id").toString() == ssid) {
+                    emit messageLogged("Deleting stale profile: " + connPath.path());
+                    conn.call("Delete");
+                }
+            }
+        }
+    }
+
     refreshInterfaces();
     
     QString wifiDevicePath;
@@ -77,8 +100,6 @@ bool NetworkManagerLinux::startHotspot(const QString &ssid, const QString &passw
 
     QVariantMap ipv4;
     ipv4["method"] = "shared";
-    // Point DNS to our Go DNS Spoofer
-    ipv4["dns"] = QVariant::fromValue(QList<uint>{0x01002a0a}); // 10.42.0.1 in network byte order
 
     QVariantMap ipv6;
     ipv6["method"] = "ignore";
@@ -128,7 +149,7 @@ bool NetworkManagerLinux::isHotspotActive() const {
 }
 
 QString NetworkManagerLinux::getHotspotUrl() const {
-    return "http://play.tesla.stream:8080";
+    return "http://10.42.0.1.nip.io:8080";
 }
 
 QString NetworkManagerLinux::getStatusMessage() const {

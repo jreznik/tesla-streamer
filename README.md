@@ -56,6 +56,19 @@ A native Decky Loader plugin is available in the `decky-plugin/` directory.
 5. In your Tesla browser, navigate to the URL shown in the GUI (e.g., `http://play.tesla.stream:8080`).
 6. Click **LAUNCH STREAM** on the web page.
 
+## Offline Mode (Captive Portal Spoofing)
+To ensure the Tesla browser stays connected even without a cellular signal, Tesla Streamer includes a built-in DNS spoofer and connectivity responder.
+
+### Prerequisites for Offline Mode
+1.  **Port 53:** The DNS spoofer needs to bind to port 53. On Linux, this requires special permissions:
+    ```bash
+    sudo setcap 'cap_net_bind_service=+ep' ./tesla-streamer
+    ```
+2.  **Firewall:** Ensure UDP port 53 is open (see Firewall section).
+
+### How it works
+When active, the spoofer tells the car that your Steam Deck is the gateway for all internet traffic. The car's "Connectivity Check" will hit our server, receive a "Success" response, and keep the Wi-Fi connection alive.
+
 ## Firewall Configuration (firewalld)
 If you are using `firewalld` (default on Fedora), you need to open the following ports to allow the Tesla to connect:
 

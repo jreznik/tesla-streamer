@@ -32,6 +32,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include "INetworkManager.h"
+#include "IFirewallManager.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -48,6 +49,7 @@ private slots:
     void updateConfig();
     void toggleHotspot();
     void toggleLogs();
+    void configureFirewall();
     void handleControlReply(QNetworkReply *reply);
     void onHotspotStateChanged(bool active);
 
@@ -63,6 +65,7 @@ private:
     QMenu *m_trayMenu;
 
     INetworkManager *m_netManager;
+    IFirewallManager *m_fwManager;
 
     // Settings Group
     QGroupBox *m_settingsGroup;
@@ -74,6 +77,7 @@ private:
     QGroupBox *m_networkGroup;
     QComboBox *m_hotspotDeviceCombo;
     QPushButton *m_hotspotBtn;
+    QPushButton *m_fwBtn;
     QLabel *m_hotspotInfoLabel;
 
     // Control Group

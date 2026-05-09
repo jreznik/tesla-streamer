@@ -48,19 +48,32 @@ func (s *Server) Start() error {
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", s.handleWebSocket)
 	
-	// Connectivity check handlers for Tesla/Chromium
+	// Connectivity check handlers for Tesla/Chromium/Android/Apple
 	connectivityHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Connectivity check from %s: %s", r.RemoteAddr, r.URL.Path)
+		log.Printf("Captive Portal check from %s: %s %s", r.RemoteAddr, r.Host, r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}
 	
+	// Google / Android / Chrome
 	http.HandleFunc("/generate_204", connectivityHandler)
 	http.HandleFunc("/gen_204", connectivityHandler)
+	// Gnome / Linux
 	http.HandleFunc("/check_network_status", connectivityHandler)
+	// Microsoft
 	http.HandleFunc("/connecttest.txt", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("MS Connect test from %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("Microsoft Connect Test"))
 	})
+	// Apple
+	http.HandleFunc("/hotspot-detect.html", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Apple Hotspot check from %s", r.RemoteAddr)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"))
+	})
+	// Catch all for any common portal paths
+	http.HandleFunc("/success.txt", connectivityHandler)
+	http.HandleFunc("/ncsi.txt", connectivityHandler)
 
 	log.Printf("Starting server on %s", s.addr)
 	return http.ListenAndServe(s.addr, nil)
