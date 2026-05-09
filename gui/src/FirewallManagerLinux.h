@@ -15,6 +15,7 @@ public:
 
 private:
     bool addPort(const QString &zone, const QString &port, const QString &protocol);
+    bool addForward(const QString &zone, const QString &port, const QString &protocol, const QString &toPort);
 };
 
 #endif

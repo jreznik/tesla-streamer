@@ -23,13 +23,11 @@ bool FirewallManagerLinux::configureFirewall() {
     }
 
     emit messageLogged("Retrieving active firewall zones...");
-    // getActiveZones returns a{sas} (Map of string to array of strings)
     QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
     QDBusMessage reply = QDBusConnection::systemBus().call(msg);
     
     QStringList zonesToConfigure;
     if (reply.type() != QDBusMessage::ErrorMessage) {
-        // Correctly parse a{sas}
         const QDBusArgument arg = reply.arguments().at(0).value<QDBusArgument>();
         QMap<QString, QStringList> activeZones;
         arg >> activeZones;
@@ -47,15 +45,32 @@ bool FirewallManagerLinux::configureFirewall() {
     bool success = true;
     for (const QString &zoneName : zonesToConfigure) {
         emit messageLogged("Configuring zone: " + zoneName);
-        success &= addPort(zoneName, "8080", "tcp");
-        success &= addPort(zoneName, "53", "udp");
-        success &= addPort(zoneName, "49152-65535", "udp");
+        
+        // 1. Open Base Ports
+        success &= addPort(zoneName, "8080", "tcp"); // Signaling
+        success &= addPort(zoneName, "5353", "udp"); // Local DNS Spoofer
+        success &= addPort(zoneName, "49152-65535", "udp"); // WebRTC Media
+        
+        // 2. Transparent Redirection (NAT)
+        // Redirection allows the car to work without specifying ports
+        
+        // DNS: 53 -> 5353
+        success &= addForward(zoneName, "53", "udp", "5353");
+        
+        // HTTP: 80 -> 8080
+        success &= addForward(zoneName, "80", "tcp", "8080");
+
+        // 3. Enable Masquerading (Required for Forwarding/Bridging)
+        QDBusReply<void> masqReply = fw.call("addMasquerade", zoneName, 0);
+        if (masqReply.isValid()) {
+            emit messageLogged("Masquerading enabled for " + zoneName);
+        }
     }
 
     if (success) {
-        emit messageLogged("SUCCESS: Firewall ports ensured in all active zones.");
+        emit messageLogged("SUCCESS: Transparent redirection active.");
     } else {
-        emit messageLogged("WARNING: Some firewall rules could not be applied.");
+        emit messageLogged("WARNING: Some firewall rules failed. Check log above.");
     }
 
     return success;
@@ -65,18 +80,32 @@ bool FirewallManagerLinux::addPort(const QString &zone, const QString &port, con
     QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
     
     // addPort (zone, port, protocol, timeout)
-    // timeout 0 = until restart (runtime only)
     QDBusReply<QString> reply = fw.call("addPort", zone, port, protocol, 0);
     
     if (!reply.isValid()) {
         if (reply.error().name() == "org.fedoraproject.FirewallD1.Exception.ALREADY_ENABLED") {
-            emit messageLogged(QString("Port %1/%2 already open.").arg(port, protocol));
             return true;
         }
-        emit messageLogged(QString("ERROR: Failed to open %1/%2: %3").arg(port, protocol, reply.error().message()));
+        emit messageLogged(QString("ERROR: Port %1/%2 failed: %3").arg(port, protocol, reply.error().message()));
         return false;
     }
+    return true;
+}
 
-    emit messageLogged(QString("Opened port %1/%2.").arg(port, protocol));
+bool FirewallManagerLinux::addForward(const QString &zone, const QString &port, const QString &protocol, const QString &toPort) {
+    QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
+    
+    // addForwardPort (zone, port, protocol, toport, toaddr, timeout)
+    // toaddr is empty for local redirection
+    QDBusReply<QString> reply = fw.call("addForwardPort", zone, port, protocol, toPort, "", 0);
+    
+    if (!reply.isValid()) {
+        if (reply.error().name() == "org.fedoraproject.FirewallD1.Exception.ALREADY_ENABLED") {
+            return true;
+        }
+        emit messageLogged(QString("ERROR: Redirect %1->%2 failed: %3").arg(port, toPort, reply.error().message()));
+        return false;
+    }
+    emit messageLogged(QString("Redirect active: %1/%2 -> %3").arg(port, protocol, toPort));
     return true;
 }

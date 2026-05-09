@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -17,20 +18,28 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Listen on all interfaces for maximum reliability
-	addr, err := net.ResolveUDPAddr("udp", ":53")
+	// Use a non-privileged port to avoid conflicts with dnsmasq/systemd-resolved
+	// We will use firewalld to redirect traffic from 53 to 5353
+	addr, err := net.ResolveUDPAddr("udp", ":5353")
 	if err != nil {
 		return err
 	}
 
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		log.Printf("DNS Spoofer CRITICAL: Failed to bind to :53. Is another DNS server running? Error: %v", err)
 		return err
 	}
 	s.conn = conn
 
-	log.Printf("DNS Spoofer ACTIVE on %s. All queries will resolve to %s", s.conn.LocalAddr().String(), s.targetIP)
+	log.Printf("DNS Spoofer ACTIVE on %s. Forwarding traffic to %s", s.conn.LocalAddr().String(), s.targetIP)
+
+	// Heartbeat to ensure logs are flowing and process is alive
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		for range ticker.C {
+			log.Println("HEARTBEAT: DNS Spoofer and Web Server are running...")
+		}
+	}()
 
 	go func() {
 		buf := make([]byte, 512)
@@ -43,7 +52,7 @@ func (s *DNSSpoofer) Start() error {
 
 			var msg dnsmessage.Message
 			if err := msg.Unpack(buf[:n]); err != nil {
-				log.Printf("DNS UNPACK ERROR from %s: %v", remoteAddr, err)
+				log.Printf("DNS UNPACK ERROR: %v", err)
 				continue
 			}
 
@@ -59,16 +68,15 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 		return
 	}
 
-	// Iterate all questions in the message
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("DNS REQUEST [%s] from %s: %s", question.Type.String(), addr.String(), name)
+		log.Printf("DNS PROBE [%s] from %s: %s", question.Type.String(), addr.String(), name)
 
 		if question.Type != dnsmessage.TypeA {
 			continue
 		}
 
-		// Spoof everything to our host IP
+		// Use detected target IP
 		ip := net.ParseIP(s.targetIP).To4()
 		if ip == nil {
 			continue
@@ -79,7 +87,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 				Name:  question.Name,
 				Type:  dnsmessage.TypeA,
 				Class: dnsmessage.ClassINET,
-				TTL:   10, // Short TTL for rapid testing
+				TTL:   5,
 			},
 			Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
 		}
@@ -87,7 +95,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 		msg.Response = true
 		msg.Authoritative = true
 		msg.Answers = append(msg.Answers, answer)
-		log.Printf("DNS SPOOFED [%s] -> %s", name, s.targetIP)
+		log.Printf("DNS HIJACK: %s -> %s", name, s.targetIP)
 	}
 
 	if len(msg.Answers) == 0 {
@@ -96,7 +104,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 
 	packed, err := msg.Pack()
 	if err != nil {
-		log.Printf("DNS pack error: %v", err)
+		log.Printf("DNS PACK ERROR: %v", err)
 		return
 	}
 
