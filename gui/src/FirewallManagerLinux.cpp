@@ -38,8 +38,13 @@ bool FirewallManagerLinux::configureFirewall() {
         if (defaultZone.isValid()) zonesToConfigure << defaultZone.value();
     }
 
+    // Always include common hotspot zones
+    if (!zonesToConfigure.contains("nm-shared")) zonesToConfigure << "nm-shared";
+    if (!zonesToConfigure.contains("public")) zonesToConfigure << "public";
+
     bool success = true;
     for (const QString &zoneName : zonesToConfigure) {
+        emit messageLogged("Configuring zone: " + zoneName);
         // Base Ports
         success &= addPort(zoneName, "8080", "tcp"); 
         success &= addPort(zoneName, "5353", "udp"); 
@@ -75,6 +80,10 @@ bool FirewallManagerLinux::cleanupFirewall() {
         arg >> activeZones;
         zones = activeZones.keys();
     }
+    
+    // Explicitly cleanup these too
+    if (!zones.contains("nm-shared")) zones << "nm-shared";
+    if (!zones.contains("public")) zones << "public";
 
     for (const QString &zoneName : zones) {
         removePort(zoneName, "8080", "tcp");

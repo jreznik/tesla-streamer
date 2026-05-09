@@ -195,11 +195,6 @@ void MainWindow::toggleHotspot() {
     if (m_netManager->isHotspotActive()) {
         m_netManager->stopHotspot();
     } else {
-        // Automatically setup firewall as first step of hotspot start IF offline mode is enabled
-        if (m_offlineCheckbox->isChecked()) {
-            m_fwManager->configureFirewall();
-        }
-        
         m_logArea->append("Requesting Hotspot start...");
         QString iface = m_hotspotDeviceCombo->currentText();
         if (!m_netManager->startHotspot("TeslaStreamer", "tesla123", iface)) {
@@ -223,6 +218,11 @@ void MainWindow::onHotspotStateChanged(bool active) {
         m_urlLabel->setText(QString("Connect at: <b>%1</b>").arg(m_netManager->getHotspotUrl()));
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
+
+        // Setup firewall AFTER the hotspot is confirmed active
+        if (m_offlineCheckbox->isChecked()) {
+            m_fwManager->configureFirewall();
+        }
     } else {
         // Cleanup firewall when hotspot is stopped
         m_fwManager->cleanupFirewall();
