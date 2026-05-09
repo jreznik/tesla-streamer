@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Screen -->
+  <rect x="10" y="24" width="108" height="80" rx="8" fill="#1A1A1A" stroke="#333333" stroke-width="4"/>
+  <rect x="18" y="32" width="92" height="64" rx="4" fill="#000000"/>
+  
+  <!-- Tesla stylized T -->
+  <path d="M44 45H84V48C84 48 70 48.5 64 62C58 48.5 44 48V45Z" fill="#E11D48"/>
+  <path d="M62 65C62 65 62 82 62 85C62 86 63 87 64 87C65 87 66 86 66 85V65C66 65 65.5 64.5 64 64.5C62.5 64.5 62 65 62 65Z" fill="#E11D48"/>
+  
+  <!-- Streaming Waves -->
+  <path d="M95 45C100 55 100 73 95 83" stroke="#E11D48" stroke-width="3" stroke-linecap="round"/>
+  <path d="M102 38C109 52 109 76 102 90" stroke="#E11D48" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round"/>
+</svg>

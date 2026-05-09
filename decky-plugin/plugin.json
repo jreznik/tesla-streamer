@@ -1,0 +1,9 @@
+{
+  "name": "Tesla Streamer",
+  "author": "Jaroslav Reznik",
+  "flags": ["root"],
+  "description": "Stream your Steam Deck screen directly to your Tesla browser.",
+  "version": "1.0.0",
+  "main": "main.py",
+  "icon": "fa-car"
+}

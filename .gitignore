@@ -1,0 +1,17 @@
+# Binaries
+tesla-streamer
+gui/build/
+build-dir/
+.flatpak-builder/
+
+# Dependencies
+vendor/
+node_modules/
+
+# OS/IDEs
+.vscode/
+.idea/
+*.swp
+*.bak
+__pycache__/
+.DS_Store

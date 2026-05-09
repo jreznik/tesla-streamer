@@ -1,0 +1,76 @@
+# Tesla Streamer - High-performance screen streaming for Tesla browsers
+# Copyright (C) 2026 Jaroslav Reznik
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Tesla Streamer - High-performance screen streaming for Tesla browsers
+# Copyright (C) 2026 Jaroslav Reznik
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+app-id: io.github.jreznik.TeslaStreamer
+runtime: org.kde.Platform
+runtime-version: '6.8'
+sdk: org.kde.Sdk
+command: tesla-streamer-gui
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=network
+  - --device=dri
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.freedesktop.portal.ScreenCast
+
+modules:
+  - name: golang
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/golang
+      - cp -a . /app/lib/golang
+    sources:
+      - type: archive
+        url: https://go.dev/dl/go1.23.1.linux-amd64.tar.gz
+        sha256: 49bbb517cfa9eee677e1e7897f7cf9cfdbcf49e05f61984a2789136de359f9bd
+
+  - name: tesla-streamer-backend
+    buildsystem: simple
+    build-commands:
+      - PATH=$PATH:/app/lib/golang/bin GOROOT=/app/lib/golang GOTOOLCHAIN=local go build -mod=vendor -o /app/bin/tesla-streamer .
+      # Package static assets into share
+      - mkdir -p /app/share/tesla-streamer/static
+      - cp -r static/* /app/share/tesla-streamer/static/
+    sources:
+      - type: dir
+        path: .
+
+  - name: tesla-streamer-gui
+    buildsystem: cmake-ninja
+    subdir: gui
+    sources:
+      - type: dir
+        path: .
+

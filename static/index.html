@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<!--
+ Tesla Streamer - High-performance screen streaming for Tesla browsers
+ Copyright (C) 2026 Jaroslav Reznik
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesla Streamer</title>
+    <style>
+        :root {
+            --tesla-red: #e11d48;
+            --tesla-red-hover: #be123c;
+            --bg-dark: #000000;
+            --card-bg: rgba(20, 20, 20, 0.8);
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        video {
+            max-width: 100%;
+            max-height: 100%;
+            background-color: var(--bg-dark);
+            z-index: 1;
+            transition: all 0.3s;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.8) 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: opacity 0.5s;
+        }
+        #status-pill {
+            position: absolute;
+            top: 30px;
+            background: var(--card-bg);
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 14px;
+            letter-spacing: 1px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            z-index: 20;
+            display: none;
+        }
+        #stats-overlay {
+            position: absolute;
+            top: 80px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: #0f0;
+            border: 1px solid #333;
+            z-index: 30;
+            pointer-events: none;
+            display: none;
+            min-width: 200px;
+        }
+        .launcher {
+            text-align: center;
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(20px);
+        }
+        h1 {
+            font-weight: 300;
+            margin-bottom: 30px;
+            letter-spacing: 2px;
+        }
+        button {
+            padding: 15px 40px;
+            font-size: 18px;
+            cursor: pointer;
+            background: var(--tesla-red);
+            color: white;
+            border: none;
+            border-radius: 40px;
+            font-weight: bold;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(225, 29, 72, 0.3);
+        }
+        button:hover {
+            background: var(--tesla-red-hover);
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(225, 29, 72, 0.5);
+        }
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        #log-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 10px;
+            color: #666;
+            text-align: left;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div id="status-pill">CONNECTED</div>
+    <div id="stats-overlay">
+        <div>Bitrate: <span id="stat-bitrate">0</span> kbps</div>
+        <div>Resolution: <span id="stat-res">0x0</span></div>
+        <div>FPS: <span id="stat-fps">0</span></div>
+        <div>Packet Loss: <span id="stat-loss">0</span>%</div>
+    </div>
+    
+    <div id="overlay">
+        <div class="launcher">
+            <h1>TESLA STREAMER</h1>
+            <button id="launchBtn">LAUNCH STREAM</button>
+        </div>
+    </div>
+
+    <video id="videoPlayer" playsinline muted></video>
+
+    <div id="log-container"></div>
+
+    <script>
+        const videoPlayer = document.getElementById('videoPlayer');
+        const launchBtn = document.getElementById('launchBtn');
+        const overlay = document.getElementById('overlay');
+        const statusPill = document.getElementById('status-pill');
+        const logContainer = document.getElementById('log-container');
+
+        let pc;
+        let ws;
+        let isConnected = false;
+        let statsInterval;
+        let lastBytesReceived = 0;
+        let lastTimestamp = 0;
+
+        function log(msg) {
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(msg);
+        }
+
+        launchBtn.onclick = () => {
+            if (isConnected) return;
+            launchBtn.disabled = true;
+            launchBtn.textContent = 'CONNECTING...';
+            connect();
+        };
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = protocol + window.location.host + '/ws';
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('Signaling established');
+                startWebRTC();
+            };
+
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'answer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                } else if (msg.type === 'candidate') {
+                    await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                } else if (msg.type === 'display_config') {
+                    log('Applying display mode: ' + msg.mode);
+                    applyDisplayMode(msg.mode);
+                } else if (msg.type === 'stats_config') {
+                    document.getElementById('stats-overlay').style.display = msg.show ? 'block' : 'none';
+                    if (msg.show && isConnected) startStatsLoop();
+                    else if (!msg.show) stopStatsLoop();
+                }
+            };
+
+            ws.onclose = () => {
+                log('Connection lost');
+                resetUI();
+            };
+
+            ws.onerror = () => {
+                log('WebSocket error');
+                resetUI();
+            };
+        }
+
+        function applyDisplayMode(mode) {
+            videoPlayer.style.width = '';
+            videoPlayer.style.height = '';
+            videoPlayer.style.maxWidth = '100%';
+            videoPlayer.style.maxHeight = '100%';
+            videoPlayer.style.objectFit = '';
+
+            switch(mode) {
+                case 'fit':
+                    videoPlayer.style.width = '100%';
+                    videoPlayer.style.height = '100%';
+                    videoPlayer.style.objectFit = 'contain';
+                    break;
+                case 'stretch':
+                    videoPlayer.style.width = '100%';
+                    videoPlayer.style.height = '100%';
+                    videoPlayer.style.objectFit = 'fill';
+                    break;
+                case 'native':
+                    videoPlayer.style.width = 'auto';
+                    videoPlayer.style.height = 'auto';
+                    videoPlayer.style.maxWidth = 'none';
+                    videoPlayer.style.maxHeight = 'none';
+                    break;
+            }
+        }
+
+        function resetUI() {
+            isConnected = false;
+            stopStatsLoop();
+            launchBtn.disabled = false;
+            launchBtn.textContent = 'LAUNCH STREAM';
+            overlay.style.opacity = '1';
+            overlay.style.pointerEvents = 'auto';
+            statusPill.style.display = 'none';
+        }
+
+        async function startWebRTC() {
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                }
+            };
+
+            pc.ontrack = (event) => {
+                log('Media track received');
+                const stream = event.streams[0] || new MediaStream([event.track]);
+                videoPlayer.srcObject = stream;
+                
+                videoPlayer.onloadedmetadata = () => {
+                    log('Stream active: ' + videoPlayer.videoWidth + 'x' + videoPlayer.videoHeight);
+                    videoPlayer.play().then(() => {
+                        overlay.style.opacity = '0';
+                        overlay.style.pointerEvents = 'none';
+                        statusPill.style.display = 'block';
+                        isConnected = true;
+                        if (document.getElementById('stats-overlay').style.display === 'block') {
+                            startStatsLoop();
+                        }
+                    }).catch(e => {
+                        log('Playback blocked');
+                        launchBtn.disabled = false;
+                        launchBtn.textContent = 'CLICK TO PLAY';
+                    });
+                };
+            };
+
+            pc.onconnectionstatechange = () => {
+                log('WebRTC State: ' + pc.connectionState);
+                if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                    resetUI();
+                }
+            };
+
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+        }
+
+        function startStatsLoop() {
+            if (statsInterval) clearInterval(statsInterval);
+            statsInterval = setInterval(async () => {
+                if (!pc || !isConnected) return;
+                
+                const stats = await pc.getStats();
+                stats.forEach(report => {
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        const now = report.timestamp;
+                        const bytes = report.bytesReceived;
+                        if (lastTimestamp > 0) {
+                            const bitrate = 8 * (bytes - lastBytesReceived) / (now - lastTimestamp);
+                            document.getElementById('stat-bitrate').textContent = bitrate.toFixed(0);
+                        }
+                        lastBytesReceived = bytes;
+                        lastTimestamp = now;
+                        
+                        if (report.framesPerSecond) {
+                            document.getElementById('stat-fps').textContent = Math.round(report.framesPerSecond);
+                        }
+                        
+                        if (report.packetsReceived > 0) {
+                            const loss = (report.packetsLost / (report.packetsLost + report.packetsReceived)) * 100;
+                            document.getElementById('stat-loss').textContent = loss.toFixed(2);
+                        }
+                    }
+                });
+                document.getElementById('stat-res').textContent = `${videoPlayer.videoWidth}x${videoPlayer.videoHeight}`;
+            }, 1000);
+        }
+
+        function stopStatsLoop() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>

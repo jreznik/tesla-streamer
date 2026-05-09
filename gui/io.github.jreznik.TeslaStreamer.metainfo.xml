@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Tesla Streamer - High-performance screen streaming for Tesla browsers
+ Copyright (C) 2026 Jaroslav Reznik
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<component type="desktop-application">
+  <id>io.github.jreznik.TeslaStreamer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Tesla Streamer</name>
+  <summary>High-performance screen streaming for Tesla cars</summary>
+  <description>
+    <p>
+      Tesla Streamer allows you to stream your laptop or SteamDeck screen directly to your Tesla's browser with ultra-low latency. 
+      It features native Wayland capture, automatic hotspot management, and real-time quality controls.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.jreznik.TeslaStreamer.desktop</launchable>
+  <provides>
+    <binary>tesla-streamer-gui</binary>
+    <binary>tesla-streamer</binary>
+  </provides>
+</component>

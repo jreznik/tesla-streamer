@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Tesla Streamer
+Comment=Stream your screen to your Tesla browser
+Exec=tesla-streamer-gui
+Icon=io.github.jreznik.TeslaStreamer
+Terminal=false
+Categories=Utility;Network;Video;
+Keywords=Tesla;Stream;Screen;Cast;
+StartupWMClass=tesla-streamer-gui
+X-Flatpak=io.github.jreznik.TeslaStreamer

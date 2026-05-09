@@ -1,0 +1,6 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file>tesla-streamer-tray.svg</file>
+    <file>io.github.jreznik.TeslaStreamer.svg</file>
+</qresource>
+</RCC>
