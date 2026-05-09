@@ -16,14 +16,12 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 }
 
 bool FirewallManagerLinux::configureFirewall() {
-    emit messageLogged("Enabling REDIRECT Mode (Kernel-Level)...");
-    
+    emit messageLogged("Detecting firewall backend...");
     bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
     
     if (hasFirewallD) {
-        emit messageLogged("Using firewalld D-Bus Redirects...");
+        emit messageLogged("Using firewalld D-Bus...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
-        
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
         
@@ -42,6 +40,7 @@ bool FirewallManagerLinux::configureFirewall() {
         if (!zones.contains("public")) zones << "public";
 
         for (const QString &zoneName : zones) {
+            emit messageLogged("Enabling redirection in zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
             addPort(zoneName, "5353", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
@@ -55,18 +54,23 @@ bool FirewallManagerLinux::configureFirewall() {
         }
         return true;
     } else {
-        emit messageLogged("Using iptables REDIRECT targets...");
+        emit messageLogged("firewalld not found. FALLING BACK TO IPTABLES (STREAMS/STEAMDECK)...");
         bool ok = true;
-        // Priority Interception (-I to put at top)
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        // Use wlp114s0f0 as the primary target for the Steam Deck hotspot
+        QString iface = "wlp114s0f0";
+
+        // Interception Rules using DNAT (Force traffic from car to hit our local ports)
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5353"});
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", "10.42.0.1:8080"});
         
-        // ACCEPT Rules
+        // ACCEPT Rules for the local machine
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
 
-        if (ok) emit messageLogged("SUCCESS: iptables redirection active.");
+        if (ok) {
+            emit messageLogged("SUCCESS: interface-specific redirection active on " + iface);
+        }
         return ok;
     }
 }
@@ -96,8 +100,9 @@ bool FirewallManagerLinux::cleanupFirewall() {
             fw.call("removeMasquerade", zoneName);
         }
     } else {
-        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5353"});
-        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+        QString iface = "wlp114s0f0";
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "10.42.0.1:5353"});
+        runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", "10.42.0.1:8080"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "5353", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});

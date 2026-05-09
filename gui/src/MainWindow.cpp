@@ -242,21 +242,21 @@ void MainWindow::startServer() {
     QString program = QCoreApplication::applicationDirPath() + "/tesla-streamer";
     QString workingDir = QCoreApplication::applicationDirPath();
     
+    // Check various locations for the binary
+    if (!QFile::exists(program)) {
+        program = QCoreApplication::applicationDirPath() + "/../tesla-streamer"; // For build/bin
+    }
+    if (!QFile::exists(program)) {
+        program = QCoreApplication::applicationDirPath() + "/../../tesla-streamer"; // For build/gui/build
+    }
+    if (!QFile::exists(program)) {
+        program = "./tesla-streamer"; // Fallback to CWD
+    }
+    
+    m_logArea->append(QString("--- Attempting to start backend: %1 ---").arg(program));
+
     // Flatpak support: check standard location for assets
     QString flatpakAssets = "/app/share/tesla-streamer";
-    if (QFile::exists(flatpakAssets + "/static")) {
-        workingDir = flatpakAssets;
-    } else {
-        // Local dev support
-        if (!QFile::exists(program)) {
-            program = QCoreApplication::applicationDirPath() + "/../tesla-streamer";
-            workingDir = QCoreApplication::applicationDirPath() + "/../";
-        }
-        if (!QFile::exists(program)) {
-            program = QCoreApplication::applicationDirPath() + "/../../tesla-streamer";
-            workingDir = QCoreApplication::applicationDirPath() + "/../../";
-        }
-    }
     
     QDir dir(workingDir);
     workingDir = dir.absolutePath();

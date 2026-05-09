@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -59,6 +60,9 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) {
+	fmt.Println("!!! BACKEND KICKSTART SUCCESSFUL !!!")
+	os.Stdout.Sync()
+
 	conf, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
