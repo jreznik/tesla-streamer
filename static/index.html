@@ -1,355 +1,311 @@
 <!DOCTYPE html>
-<!--
- Tesla Streamer - High-performance screen streaming for Tesla browsers
- Copyright (C) 2026 Jaroslav Reznik
-
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
-
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <https://www.gnu.org/licenses/>.
--->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tesla Streamer</title>
     <style>
-        :root {
-            --tesla-red: #e11d48;
-            --tesla-red-hover: #be123c;
-            --bg-dark: #000000;
-            --card-bg: rgba(20, 20, 20, 0.8);
-        }
-        body {
+        body, html {
             margin: 0;
             padding: 0;
-            background-color: var(--bg-dark);
-            color: white;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             overflow: hidden;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
         }
+
+        #video-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         video {
             max-width: 100%;
             max-height: 100%;
-            background-color: var(--bg-dark);
-            z-index: 1;
-            transition: all 0.3s;
+            background-color: #000;
         }
-        #overlay {
+
+        .status-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(circle, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.8) 100%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
             z-index: 10;
-            transition: opacity 0.5s;
-        }
-        #status-pill {
-            position: absolute;
-            top: 30px;
-            background: var(--card-bg);
-            padding: 10px 20px;
-            border-radius: 30px;
-            font-size: 14px;
-            letter-spacing: 1px;
-            border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            z-index: 20;
-            display: none;
-        }
-        #stats-overlay {
-            position: absolute;
-            top: 80px;
-            right: 20px;
+            text-align: center;
             background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
+            padding: 20px 40px;
             border-radius: 10px;
-            font-family: 'Consolas', monospace;
-            font-size: 12px;
-            color: #0f0;
             border: 1px solid #333;
-            z-index: 30;
+        }
+
+        .status-text {
+            font-size: 24px;
+            margin-bottom: 10px;
+            font-weight: 300;
+            letter-spacing: 1px;
+        }
+
+        /* Pulsing animation for "Connecting" text */
+        .connecting-pulse {
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        /* Animated dots */
+        .dots::after {
+            content: '';
+            animation: dots 1.5s infinite steps(4);
+        }
+
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+
+        .stats-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
             pointer-events: none;
             display: none;
-            min-width: 200px;
         }
-        .launcher {
-            text-align: center;
-            background: var(--card-bg);
-            padding: 40px;
-            border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(20px);
-        }
-        h1 {
-            font-weight: 300;
-            margin-bottom: 30px;
-            letter-spacing: 2px;
-        }
-        button {
-            padding: 15px 40px;
-            font-size: 18px;
-            cursor: pointer;
-            background: var(--tesla-red);
-            color: white;
-            border: none;
-            border-radius: 40px;
-            font-weight: bold;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 4px 15px rgba(225, 29, 72, 0.3);
-        }
-        button:hover {
-            background: var(--tesla-red-hover);
-            transform: scale(1.05);
-            box-shadow: 0 6px 20px rgba(225, 29, 72, 0.5);
-        }
-        button:disabled {
-            background: #444;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        #log-container {
+
+        .controls {
             position: absolute;
             bottom: 20px;
-            left: 20px;
-            right: 20px;
-            max-height: 120px;
-            overflow-y: auto;
-            font-family: 'Consolas', monospace;
-            font-size: 10px;
-            color: #666;
-            text-align: left;
-            pointer-events: none;
-            opacity: 0.5;
+            opacity: 0;
+            transition: opacity 0.3s;
+            display: flex;
+            gap: 10px;
+        }
+
+        #video-container:hover .controls {
+            opacity: 1;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .error {
+            color: #ff4444;
         }
     </style>
 </head>
 <body>
-    <div id="status-pill">CONNECTED</div>
-    <div id="stats-overlay">
-        <div>Bitrate: <span id="stat-bitrate">0</span> kbps</div>
-        <div>Resolution: <span id="stat-res">0x0</span></div>
-        <div>FPS: <span id="stat-fps">0</span></div>
-        <div>Packet Loss: <span id="stat-loss">0</span>%</div>
-    </div>
-    
-    <div id="overlay">
-        <div class="launcher">
-            <h1>TESLA STREAMER</h1>
-            <button id="launchBtn">LAUNCH STREAM</button>
+    <div id="video-container">
+        <div id="status-overlay" class="status-overlay">
+            <div id="status-text" class="status-text connecting-pulse">Connecting<span class="dots"></span></div>
+            <div id="status-detail" style="font-size: 14px; color: #888;">Initializing WebRTC handshake</div>
+        </div>
+
+        <div id="stats" class="stats-overlay"></div>
+        
+        <video id="remoteVideo" autoplay playsinline muted></video>
+
+        <div class="controls">
+            <button onclick="toggleFullscreen()">Toggle Fullscreen</button>
+            <button onclick="requestKeyframe()">Force Refresh</button>
+            <button id="stats-toggle" onclick="toggleStats()">Show Stats</button>
         </div>
     </div>
 
-    <video id="videoPlayer" playsinline muted></video>
-
-    <div id="log-container"></div>
-
     <script>
-        const videoPlayer = document.getElementById('videoPlayer');
-        const launchBtn = document.getElementById('launchBtn');
-        const overlay = document.getElementById('overlay');
-        const statusPill = document.getElementById('status-pill');
-        const logContainer = document.getElementById('log-container');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusOverlay = document.getElementById('status-overlay');
+        const statusText = document.getElementById('status-text');
+        const statusDetail = document.getElementById('status-detail');
+        const statsOverlay = document.getElementById('stats');
+        
+        let pc = null;
+        let ws = null;
+        let statsInterval = null;
+        let displayMode = 'fit';
 
-        let pc;
-        let ws;
-        let isConnected = false;
-        let statsInterval;
-        let lastBytesReceived = 0;
-        let lastTimestamp = 0;
-
-        function log(msg) {
-            const entry = document.createElement('div');
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            logContainer.appendChild(entry);
-            logContainer.scrollTop = logContainer.scrollHeight;
-            console.log(msg);
+        function updateStatus(text, detail = '', isError = false) {
+            statusText.innerText = text;
+            statusDetail.innerText = detail;
+            if (isError) {
+                statusText.classList.add('error');
+                statusText.classList.remove('connecting-pulse');
+                // Remove dots span if it exists in error mode
+                const dots = statusText.querySelector('.dots');
+                if (dots) dots.remove();
+            } else {
+                statusText.classList.remove('error');
+            }
+            statusOverlay.style.display = (text === '') ? 'none' : 'block';
         }
 
-        launchBtn.onclick = () => {
-            if (isConnected) return;
-            launchBtn.disabled = true;
-            launchBtn.textContent = 'CONNECTING...';
-            connect();
-        };
-
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const wsUrl = protocol + window.location.host + '/ws';
+        async function start() {
+            updateStatus('Connecting', 'Connecting to signaling server...', false);
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
             ws = new WebSocket(wsUrl);
-
+            
             ws.onopen = () => {
-                log('Signaling established');
-                startWebRTC();
+                updateStatus('Connecting', 'Signaling server connected. Creating offer...', false);
+                setupWebRTC();
             };
 
             ws.onmessage = async (event) => {
                 const msg = JSON.parse(event.data);
+                
                 if (msg.type === 'answer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                    updateStatus('Connecting', 'Received answer. Establishing stream...', false);
+                    await pc.setRemoteDescription(new RTCSessionDescription({
+                        type: 'answer',
+                        sdp: msg.sdp
+                    }));
                 } else if (msg.type === 'candidate') {
-                    await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    if (msg.candidate) {
+                        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    }
                 } else if (msg.type === 'display_config') {
-                    log('Applying display mode: ' + msg.mode);
-                    applyDisplayMode(msg.mode);
+                    setDisplayMode(msg.mode);
                 } else if (msg.type === 'stats_config') {
-                    document.getElementById('stats-overlay').style.display = msg.show ? 'block' : 'none';
-                    if (msg.show && isConnected) startStatsLoop();
-                    else if (!msg.show) stopStatsLoop();
+                    statsOverlay.style.display = msg.show ? 'block' : 'none';
                 }
             };
 
             ws.onclose = () => {
-                log('Connection lost');
-                resetUI();
+                updateStatus('Disconnected', 'Connection to server lost. Retrying in 3s...', true);
+                setTimeout(start, 3000);
             };
 
-            ws.onerror = () => {
-                log('WebSocket error');
-                resetUI();
+            ws.onerror = (e) => {
+                updateStatus('Connection Error', 'Signaling failed. Check network.', true);
             };
         }
 
-        function applyDisplayMode(mode) {
-            videoPlayer.style.width = '';
-            videoPlayer.style.height = '';
-            videoPlayer.style.maxWidth = '100%';
-            videoPlayer.style.maxHeight = '100%';
-            videoPlayer.style.objectFit = '';
-
-            switch(mode) {
-                case 'fit':
-                    videoPlayer.style.width = '100%';
-                    videoPlayer.style.height = '100%';
-                    videoPlayer.style.objectFit = 'contain';
-                    break;
-                case 'stretch':
-                    videoPlayer.style.width = '100%';
-                    videoPlayer.style.height = '100%';
-                    videoPlayer.style.objectFit = 'fill';
-                    break;
-                case 'native':
-                    videoPlayer.style.width = 'auto';
-                    videoPlayer.style.height = 'auto';
-                    videoPlayer.style.maxWidth = 'none';
-                    videoPlayer.style.maxHeight = 'none';
-                    break;
-            }
-        }
-
-        function resetUI() {
-            isConnected = false;
-            stopStatsLoop();
-            launchBtn.disabled = false;
-            launchBtn.textContent = 'LAUNCH STREAM';
-            overlay.style.opacity = '1';
-            overlay.style.pointerEvents = 'auto';
-            statusPill.style.display = 'none';
-        }
-
-        async function startWebRTC() {
+        async function setupWebRTC() {
             pc = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
             });
 
             pc.onicecandidate = (event) => {
                 if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                    ws.send(JSON.stringify({
+                        type: 'candidate',
+                        candidate: event.candidate
+                    }));
                 }
             };
 
             pc.ontrack = (event) => {
-                log('Media track received');
-                const stream = event.streams[0] || new MediaStream([event.track]);
-                videoPlayer.srcObject = stream;
-                
-                videoPlayer.onloadedmetadata = () => {
-                    log('Stream active: ' + videoPlayer.videoWidth + 'x' + videoPlayer.videoHeight);
-                    videoPlayer.play().then(() => {
-                        overlay.style.opacity = '0';
-                        overlay.style.pointerEvents = 'none';
-                        statusPill.style.display = 'block';
-                        isConnected = true;
-                        if (document.getElementById('stats-overlay').style.display === 'block') {
-                            startStatsLoop();
-                        }
-                    }).catch(e => {
-                        log('Playback blocked');
-                        launchBtn.disabled = false;
-                        launchBtn.textContent = 'CLICK TO PLAY';
-                    });
-                };
+                console.log('Received remote track');
+                updateStatus(''); // Clear status when video starts
+                remoteVideo.srcObject = event.streams[0];
             };
 
             pc.onconnectionstatechange = () => {
-                log('WebRTC State: ' + pc.connectionState);
-                if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-                    resetUI();
+                console.log('Connection state:', pc.connectionState);
+                if (pc.connectionState === 'connected') {
+                    updateStatus('');
+                    startStats();
+                } else if (pc.connectionState === 'failed') {
+                    updateStatus('Stream Failed', 'WebRTC negotiation failed.', true);
                 }
             };
 
+            // Add transceiver for video
             pc.addTransceiver('video', { direction: 'recvonly' });
+
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+
+            ws.send(JSON.stringify({
+                type: 'offer',
+                sdp: offer.sdp
+            }));
         }
 
-        function startStatsLoop() {
+        function setDisplayMode(mode) {
+            displayMode = mode;
+            if (mode === 'stretch') {
+                remoteVideo.style.objectFit = 'fill';
+                remoteVideo.style.width = '100%';
+                remoteVideo.style.height = '100%';
+            } else if (mode === 'native') {
+                remoteVideo.style.objectFit = 'none';
+                remoteVideo.style.width = 'auto';
+                remoteVideo.style.height = 'auto';
+            } else {
+                // Default fit
+                remoteVideo.style.objectFit = 'contain';
+                remoteVideo.style.width = '100%';
+                remoteVideo.style.height = '100%';
+            }
+        }
+
+        function startStats() {
             if (statsInterval) clearInterval(statsInterval);
             statsInterval = setInterval(async () => {
-                if (!pc || !isConnected) return;
-                
+                if (!pc) return;
                 const stats = await pc.getStats();
+                let statsText = '';
                 stats.forEach(report => {
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                        const now = report.timestamp;
-                        const bytes = report.bytesReceived;
-                        if (lastTimestamp > 0) {
-                            const bitrate = 8 * (bytes - lastBytesReceived) / (now - lastTimestamp);
-                            document.getElementById('stat-bitrate').textContent = bitrate.toFixed(0);
-                        }
-                        lastBytesReceived = bytes;
-                        lastTimestamp = now;
-                        
-                        if (report.framesPerSecond) {
-                            document.getElementById('stat-fps').textContent = Math.round(report.framesPerSecond);
-                        }
-                        
-                        if (report.packetsReceived > 0) {
-                            const loss = (report.packetsLost / (report.packetsLost + report.packetsReceived)) * 100;
-                            document.getElementById('stat-loss').textContent = loss.toFixed(2);
-                        }
+                        const fps = report.framesPerSecond || 0;
+                        const bitrate = Math.round(report.bytesReceived * 8 / (report.timestamp / 1000) / 1000);
+                        statsText += `FPS: ${fps} | Bitrate: ${bitrate} kbps | Loss: ${report.packetsLost}\n`;
                     }
                 });
-                document.getElementById('stat-res').textContent = `${videoPlayer.videoWidth}x${videoPlayer.videoHeight}`;
+                statsOverlay.innerText = statsText;
             }, 1000);
         }
 
-        function stopStatsLoop() {
-            if (statsInterval) {
-                clearInterval(statsInterval);
-                statsInterval = null;
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
             }
         }
+
+        function requestKeyframe() {
+            if (ws) ws.send(JSON.stringify({ type: 'reselect' }));
+        }
+
+        function toggleStats() {
+            const isVisible = statsOverlay.style.display === 'block';
+            statsOverlay.style.display = isVisible ? 'none' : 'block';
+            document.getElementById('stats-toggle').innerText = isVisible ? 'Show Stats' : 'Hide Stats';
+        }
+
+        // Start on load
+        start();
     </script>
 </body>
 </html>

@@ -19,7 +19,6 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 bool FirewallManagerLinux::configureFirewall(bool offlineMode) {
     emit messageLogged(QString("Configuring firewall (OfflineMode=%1)...").arg(offlineMode));
     
-    // Detect likely hotspot interface
     QString iface;
     const auto interfaces = QNetworkInterface::allInterfaces();
     for (const auto &ni : interfaces) {
@@ -53,13 +52,15 @@ bool FirewallManagerLinux::configureFirewall(bool offlineMode) {
         for (const QString &zoneName : zones) {
             emit messageLogged("Opening streaming ports in zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
+            addPort(zoneName, "5354", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
             
+            // ALWAYS enable DNS/HTTP redirection to support 'play.tesla.stream' domain
+            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
+            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+            
             if (offlineMode) {
-                emit messageLogged("Enabling redirection rules for Offline Mode...");
-                addPort(zoneName, "5354", "udp"); 
-                addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
-                addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+                // Only force insecure fallback in Offline Mode
                 addRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
             }
             fw.call("addMasquerade", zoneName, 0);
@@ -70,13 +71,15 @@ bool FirewallManagerLinux::configureFirewall(bool offlineMode) {
         bool ok = true;
         // Always allow base streaming ports
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
+        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
         
+        // ALWAYS enable redirection for domain support
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
+        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+
         if (offlineMode) {
-            ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
-            ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
             ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
-            ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         }
 
         if (ok) emit messageLogged("SUCCESS: Firewall configured for " + iface);
@@ -114,8 +117,8 @@ bool FirewallManagerLinux::cleanupFirewall() {
 
         for (const QString &zoneName : zones) {
             removePort(zoneName, "8080", "tcp");
-            removePort(zoneName, "49152-65535", "udp");
             removePort(zoneName, "5354", "udp");
+            removePort(zoneName, "49152-65535", "udp");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
@@ -123,14 +126,14 @@ bool FirewallManagerLinux::cleanupFirewall() {
         }
     } else {
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
         
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
     }
-    emit messageLogged("Firewall restored.");
+    emit messageLogged("Firewall cleaned.");
     return true;
 }
 
