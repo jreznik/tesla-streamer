@@ -78,6 +78,8 @@ func (s *Server) Start() error {
 		isSystem := strings.Contains(ua, "Dalvik") || 
 			strings.Contains(ua, "CaptivePortal") || 
 			strings.Contains(ua, "NetworkCheck") ||
+			strings.Contains(ua, "ConnMan") ||
+			strings.Contains(ua, "wispr") ||
 			ua == ""
 
 		isProbePath := strings.Contains(path, "generate_204") || 
@@ -87,11 +89,22 @@ func (s *Server) Start() error {
 			strings.Contains(path, "ncsi.txt") ||
 			strings.Contains(path, "connecttest") ||
 			strings.Contains(path, "hotspot-detect") ||
+			strings.Contains(path, "status.html") ||
 			strings.Contains(path, "success.html")
 
 		// --- STEP 3: SATISFY PROBES ---
 		
-		// A. Microsoft / Android NCSI (Magic String)
+		// A. ConnMan / Tesla Specific (status.html + Header)
+		if strings.Contains(path, "status.html") {
+			log.Printf("!!! SATISFYING CONNMAN PROBE !!! -> 200 OK 'online'")
+			w.Header().Set("X-ConnMan-Status", "online")
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("<html><body>ConnMan Online Check</body></html>"))
+			return
+		}
+
+		// B. Microsoft / Android NCSI (Magic String)
 		if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
 			log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK")
 			w.Header().Set("Content-Type", "text/plain")
@@ -100,7 +113,7 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// B. Apple Success (Specific HTML)
+		// C. Apple Success (Specific HTML)
 		if strings.Contains(path, "hotspot-detect.html") || strings.Contains(path, "success.html") {
 			log.Printf("!!! SATISFYING APPLE PROBE !!! -> 200 OK")
 			w.Header().Set("Content-Type", "text/html")
@@ -109,7 +122,7 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// C. Google / Android / Tesla (Zero-Byte 204)
+		// D. Google / Android / Tesla (Zero-Byte 204)
 		if isProbePath || (isSystem && path == "/") {
 			log.Printf("!!! SATISFYING CONNECTIVITY CHECK !!! -> 204 No Content")
 			w.Header().Set("X-Android-Response", "204")
@@ -132,7 +145,6 @@ func (s *Server) Start() error {
 		}
 
 		// --- STEP 5: GREEDY HIJACK (FORCED SUCCESS) ---
-		// If they hit us on any other domain, return 204 to convince the device the "internet is up".
 		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", host)
 		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
 		w.WriteHeader(http.StatusNoContent)
