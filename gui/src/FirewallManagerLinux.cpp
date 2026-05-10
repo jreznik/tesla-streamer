@@ -16,10 +16,10 @@ FirewallManagerLinux::FirewallManagerLinux(QObject *parent) : IFirewallManager()
 FirewallManagerLinux::~FirewallManagerLinux() {
 }
 
-bool FirewallManagerLinux::configureFirewall() {
-    emit messageLogged("Enabling Network Hijacking (Captive Portal Mode)...");
+bool FirewallManagerLinux::configureFirewall(bool offlineMode) {
+    emit messageLogged(QString("Configuring firewall (OfflineMode=%1)...").arg(offlineMode));
     
-    // Detect the likely hotspot interface (first active non-loopback Wi-Fi)
+    // Detect likely hotspot interface
     QString iface;
     const auto interfaces = QNetworkInterface::allInterfaces();
     for (const auto &ni : interfaces) {
@@ -30,19 +30,13 @@ bool FirewallManagerLinux::configureFirewall() {
             break;
         }
     }
-
-    if (iface.isEmpty()) {
-        emit messageLogged("WARNING: Could not detect active Wi-Fi interface. Falling back to default.");
-        iface = "wlp114s0f0"; // Absolute fallback from logs
-    }
-    emit messageLogged("Targeting interface: " + iface);
+    if (iface.isEmpty()) iface = "wlp114s0f0";
 
     bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
     
     if (hasFirewallD) {
         emit messageLogged("Using firewalld D-Bus...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
-        
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
         
@@ -57,43 +51,41 @@ bool FirewallManagerLinux::configureFirewall() {
         if (!zones.contains("public")) zones << "public";
 
         for (const QString &zoneName : zones) {
-            emit messageLogged("Configuring zone: " + zoneName);
+            emit messageLogged("Opening streaming ports in zone: " + zoneName);
             addPort(zoneName, "8080", "tcp"); 
-            addPort(zoneName, "5354", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
             
-            // Redirect incoming probes to our local high ports
-            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
-            addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
-            // Force insecure fallback
-            addRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
-            
+            if (offlineMode) {
+                emit messageLogged("Enabling redirection rules for Offline Mode...");
+                addPort(zoneName, "5354", "udp"); 
+                addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
+                addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
+                addRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
+            }
             fw.call("addMasquerade", zoneName, 0);
         }
         return true;
     } else {
-        emit messageLogged("Using iptables REDIRECT (Steam Deck Mode)...");
+        emit messageLogged("Using direct iptables rules...");
         bool ok = true;
-        // Priority Interception
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
-        ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
-        
-        // Block HTTPS to force HTTP probe
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
-
-        // Local Accept Rules
-        ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
+        // Always allow base streaming ports
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+        
+        if (offlineMode) {
+            ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
+            ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
+            ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
+            ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
+        }
 
-        if (ok) emit messageLogged("SUCCESS: Redirection active on " + iface);
+        if (ok) emit messageLogged("SUCCESS: Firewall configured for " + iface);
         return ok;
     }
 }
 
 bool FirewallManagerLinux::cleanupFirewall() {
-    emit messageLogged("Restoring system firewall...");
-    
+    emit messageLogged("Restoring firewall...");
     QString iface;
     const auto interfaces = QNetworkInterface::allInterfaces();
     for (const auto &ni : interfaces) {
@@ -122,22 +114,23 @@ bool FirewallManagerLinux::cleanupFirewall() {
 
         for (const QString &zoneName : zones) {
             removePort(zoneName, "8080", "tcp");
-            removePort(zoneName, "5354", "udp");
             removePort(zoneName, "49152-65535", "udp");
+            removePort(zoneName, "5354", "udp");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
             removeRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
             fw.call("removeMasquerade", zoneName);
         }
     } else {
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
+        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
+        
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
-        runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
     }
-    emit messageLogged("Firewall cleaned.");
+    emit messageLogged("Firewall restored.");
     return true;
 }
 

@@ -215,14 +215,25 @@ void MainWindow::onHotspotStateChanged(bool active) {
         m_hotspotDeviceCombo->setEnabled(false);
         m_offlineCheckbox->setEnabled(false);
         m_hotspotInfoLabel->setVisible(true);
-        m_urlLabel->setText(QString("Connect at: <b>%1</b>").arg(m_netManager->getHotspotUrl()));
+        
+        // Find local IP address for debugging but show domain as primary
+        QString localIp = "10.42.0.1";
+        const QList<QHostAddress> list = QNetworkInterface::allAddresses();
+        for (const QHostAddress &address : list) {
+            if (address != QHostAddress::LocalHost && address.toIPv4Address()) {
+                if (address.toString().startsWith("10.42.0")) {
+                    localIp = address.toString();
+                    break;
+                }
+            }
+        }
+
+        m_urlLabel->setText(QString("Connect at: <b>http://play.tesla.stream</b> (<i>IP: %1</i>)").arg(localIp));
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
 
-        // Setup firewall AFTER the hotspot is confirmed active
-        if (m_offlineCheckbox->isChecked()) {
-            m_fwManager->configureFirewall();
-        }
+        // ALWAYS configure firewall when hotspot is active
+        m_fwManager->configureFirewall(m_offlineCheckbox->isChecked());
     } else {
         // Cleanup firewall when hotspot is stopped
         m_fwManager->cleanupFirewall();

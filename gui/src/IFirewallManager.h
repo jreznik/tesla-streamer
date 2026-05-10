@@ -10,7 +10,7 @@ class IFirewallManager : public QObject {
 public:
     virtual ~IFirewallManager() {}
 
-    virtual bool configureFirewall() = 0;
+    virtual bool configureFirewall(bool offlineMode) = 0;
     virtual bool cleanupFirewall() = 0;
 
 signals:

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -44,7 +45,21 @@ func (s *Server) Start() error {
 		mux.HandleFunc(pattern, handler)
 	}
 
-	fileServer := http.FileServer(http.Dir("./static"))
+	// Robust static asset detection
+	staticDir := "./static"
+	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
+		// Check relative to binary
+		exePath, err := os.Executable()
+		if err == nil {
+			staticDir = filepath.Join(filepath.Dir(exePath), "static")
+			if _, err := os.Stat(staticDir); os.IsNotExist(err) {
+				// Check two levels up (for build/bin structure)
+				staticDir = filepath.Join(filepath.Dir(filepath.Dir(exePath)), "static")
+			}
+		}
+	}
+	log.Printf("Using static assets from: %s", staticDir)
+	fileServer := http.FileServer(http.Dir(staticDir))
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ua := r.Header.Get("User-Agent")

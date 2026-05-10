@@ -11,7 +11,7 @@ public:
     FirewallManagerLinux(QObject *parent = nullptr);
     ~FirewallManagerLinux();
 
-    bool configureFirewall() override;
+    bool configureFirewall(bool offlineMode) override;
     bool cleanupFirewall() override;
 
 private:
