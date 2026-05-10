@@ -286,16 +286,17 @@ void MainWindow::startServer() {
         m_statusLabel->setText("Server: <b>Running</b>");
         m_reselectBtn->setEnabled(true);
         
-        // Find local IP address
-        QString localIp = "localhost";
+        // Ensure domain-based URL is shown even after server start
+        QString localIp = "10.42.0.1";
         const QList<QHostAddress> list = QNetworkInterface::allAddresses();
         for (const QHostAddress &address : list) {
             if (address != QHostAddress::LocalHost && address.toIPv4Address()) {
-                localIp = address.toString();
-                break;
+                if (address.toString().startsWith("10.42.0")) {
+                    localIp = address.toString();
+                    break;
+                }
             }
         }
-
         m_urlLabel->setText(QString("Connect at: <b>http://play.tesla.stream</b> (<i>IP: %1</i>)").arg(localIp));
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
@@ -332,6 +333,7 @@ void MainWindow::sendConfig() {
     obj["profile"] = m_profileCombo->currentText();
     obj["display"] = m_displayCombo->currentData().toString();
     obj["show_stats"] = m_statsCheckbox->isChecked();
+    obj["offline_mode"] = m_offlineCheckbox->isChecked();
     
     QNetworkRequest request(QUrl("http://localhost:8080/api/config"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");

@@ -4,6 +4,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -11,15 +14,25 @@ import (
 type DNSSpoofer struct {
 	targetIP string
 	conn     *net.UDPConn
+	offline  bool
+	mu       sync.Mutex
 }
 
 func NewDNSSpoofer(targetIP string) *DNSSpoofer {
-	return &DNSSpoofer{targetIP: targetIP}
+	return &DNSSpoofer{
+		targetIP: targetIP,
+		offline:  false,
+	}
+}
+
+func (s *DNSSpoofer) SetOffline(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.offline = enabled
+	log.Printf("DNS Spoofer Mode: Offline=%v", enabled)
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Bind to high port 5354. No root/setcap needed.
-	// Firewall will REDIRECT 53 -> 5354
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
 	if err != nil {
 		return err
@@ -32,10 +45,7 @@ func (s *DNSSpoofer) Start() error {
 	}
 	s.conn = conn
 
-	log.Printf("--------------------------------------------------")
-	log.Printf("DNS SPOOFER ACTIVE on %s (User Mode)", s.conn.LocalAddr().String())
-	log.Printf("Redirecting all probes to %s", s.targetIP)
-	log.Printf("--------------------------------------------------")
+	log.Printf("DNS SPOOFER ALIVE on %s", s.conn.LocalAddr().String())
 	os.Stdout.Sync()
 
 	go func() {
@@ -46,28 +56,60 @@ func (s *DNSSpoofer) Start() error {
 				break
 			}
 
+			raw := make([]byte, n)
+			copy(raw, buf[:n])
+
 			var msg dnsmessage.Message
-			if err := msg.Unpack(buf[:n]); err != nil {
+			if err := msg.Unpack(raw); err != nil {
 				continue
 			}
 
-			go s.handleQuery(remoteAddr, msg)
+			go s.handleQuery(remoteAddr, msg, raw)
 		}
 	}()
 
 	return nil
 }
 
-func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
+func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message, raw []byte) {
 	if len(msg.Questions) == 0 {
 		return
 	}
 
+	s.mu.Lock()
+	offline := s.offline
+	s.mu.Unlock()
+
+	shouldSpoof := false
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("INCOMING DNS PROBE: %s [%s]", name, question.Type.String())
-		os.Stdout.Sync()
+		
+		// Always spoof our specific domains
+		if strings.Contains(name, "tesla.stream") {
+			shouldSpoof = true
+			break
+		}
+		
+		// If in offline mode, we spoof everything to simulate internet
+		if offline {
+			shouldSpoof = true
+			break
+		}
+	}
 
+	if shouldSpoof {
+		s.respondSpoofed(addr, msg)
+	} else {
+		// Online Mode: Forward to real DNS so car's internet doesn't break
+		s.forwardQuery(addr, raw)
+	}
+}
+
+func (s *DNSSpoofer) respondSpoofed(addr *net.UDPAddr, msg dnsmessage.Message) {
+	for _, question := range msg.Questions {
+		name := question.Name.String()
+		log.Printf("DNS SPOOF: %s [%s]", name, question.Type.String())
+		
 		msg.Response = true
 		msg.Authoritative = true
 
@@ -84,25 +126,39 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 					Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
 				}
 				msg.Answers = append(msg.Answers, answer)
-				log.Printf("SPOOFING ANSWER A -> %s", s.targetIP)
-				os.Stdout.Sync()
 			}
-		} else if question.Type == dnsmessage.TypeAAAA {
-			log.Printf("SPOOFING AAAA -> EMPTY (Force IPv4)")
-			os.Stdout.Sync()
 		}
-	}
-
-	if len(msg.Answers) == 0 && !msg.Response {
-		return
+		// AAAA is handled by returning an empty authoritative success (NOERROR)
 	}
 
 	packed, err := msg.Pack()
 	if err != nil {
 		return
 	}
-
 	s.conn.WriteToUDP(packed, addr)
+}
+
+func (s *DNSSpoofer) forwardQuery(addr *net.UDPAddr, raw []byte) {
+	// Simple UDP proxy to Google DNS
+	upstream, err := net.DialTimeout("udp", "8.8.8.8:53", 2*time.Second)
+	if err != nil {
+		return
+	}
+	defer upstream.Close()
+
+	_, err = upstream.Write(raw)
+	if err != nil {
+		return
+	}
+
+	upstream.SetReadDeadline(time.Now().Add(2 * time.Second))
+	resp := make([]byte, 512)
+	n, err := upstream.Read(resp)
+	if err != nil {
+		return
+	}
+
+	s.conn.WriteToUDP(resp[:n], addr)
 }
 
 func (s *DNSSpoofer) Stop() {

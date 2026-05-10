@@ -61,12 +61,6 @@ func run(cmd *cobra.Command, args []string) {
 
 	srv := server.NewServer(addr)
 
-	// Start DNS Spoofer for offline mode on port 5353
-	dns := server.NewDNSSpoofer("10.42.0.1")
-	if err := dns.Start(); err != nil {
-		log.Printf("Warning: Could not start DNS Spoofer: %v", err)
-	}
-
 	// Create WebRTC manager
 	rtc, err := webrtc_manager.NewWebRTCManager(func(candidate *webrtc.ICECandidate) {
 		srv.SendMessage(map[string]interface{}{
@@ -79,6 +73,12 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	captureMgr := capture.NewCaptureManager(rtc, conf)
+
+	// Keep DNS reference for mode updates
+	dns := server.NewDNSSpoofer("10.42.0.1")
+	if err := dns.Start(); err != nil {
+		log.Printf("Warning: Could not start DNS Spoofer: %v", err)
+	}
 
 	// Control API
 	srv.HandleFunc("/api/reselect", func(w http.ResponseWriter, r *http.Request) {
@@ -96,17 +96,21 @@ func run(cmd *cobra.Command, args []string) {
 
 	srv.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Profile    string `json:"profile"`
-			Resolution string `json:"resolution"`
-			Bitrate    int    `json:"bitrate"`
-			Display    string `json:"display"`
-			ShowStats  bool   `json:"show_stats"`
+			Profile     string `json:"profile"`
+			Resolution  string `json:"resolution"`
+			Bitrate     int    `json:"bitrate"`
+			Display     string `json:"display"`
+			ShowStats   bool   `json:"show_stats"`
+			OfflineMode bool   `json:"offline_mode"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		// Update DNS mode
+		dns.SetOffline(req.OfflineMode)
 
 		newConf := capture.Config{
 			Profile:    req.Profile,
