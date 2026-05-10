@@ -125,9 +125,11 @@ func (s *Server) Start() error {
 		isTargetHost := host == "10.42.0.1" || host == "10.42.0.1:8080" || strings.Contains(host, "tesla.stream")
 
 		if isBrowser && isTargetHost {
-			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
+			// If it's a known API or WebSocket route, use the mux
+			if strings.HasPrefix(path, "/ws") || strings.HasPrefix(path, "/api") {
 				mux.ServeHTTP(w, r)
 			} else {
+				// Otherwise serve from the static file system (handles / automatically)
 				fileServer.ServeHTTP(w, r)
 			}
 			return

@@ -296,7 +296,7 @@ void MainWindow::startServer() {
             }
         }
 
-        m_urlLabel->setText(QString("Connect at: <b>http://%1:8080</b>").arg(localIp));
+        m_urlLabel->setText(QString("Connect at: <b>http://play.tesla.stream</b> (<i>IP: %1</i>)").arg(localIp));
         m_urlLabel->setVisible(true);
         m_openBrowserBtn->setVisible(true);
         
