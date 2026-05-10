@@ -4,6 +4,7 @@
 #include <QtDBus/QDBusConnectionInterface>
 #include <QProcess>
 #include <QDebug>
+#include <QNetworkInterface>
 
 #define FIREWALLD_SERVICE "org.fedoraproject.FirewallD1"
 #define FIREWALLD_PATH "/org/fedoraproject/FirewallD1"
@@ -16,13 +17,32 @@ FirewallManagerLinux::~FirewallManagerLinux() {
 }
 
 bool FirewallManagerLinux::configureFirewall() {
-    emit messageLogged("Enabling Hardened Redirection (Kernel-Level)...");
+    emit messageLogged("Enabling Network Hijacking (Captive Portal Mode)...");
     
+    // Detect the likely hotspot interface (first active non-loopback Wi-Fi)
+    QString iface;
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (const auto &ni : interfaces) {
+        if (ni.flags().testFlag(QNetworkInterface::IsUp) && 
+            !ni.flags().testFlag(QNetworkInterface::IsLoopBack) &&
+            (ni.name().startsWith("wlp") || ni.name().startsWith("wlan"))) {
+            iface = ni.name();
+            break;
+        }
+    }
+
+    if (iface.isEmpty()) {
+        emit messageLogged("WARNING: Could not detect active Wi-Fi interface. Falling back to default.");
+        iface = "wlp114s0f0"; // Absolute fallback from logs
+    }
+    emit messageLogged("Targeting interface: " + iface);
+
     bool hasFirewallD = QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE);
     
     if (hasFirewallD) {
-        emit messageLogged("Using firewalld D-Bus Redirects...");
+        emit messageLogged("Using firewalld D-Bus...");
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_SERVICE, QDBusConnection::systemBus());
+        
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
         QDBusMessage reply = QDBusConnection::systemBus().call(msg);
         
@@ -42,40 +62,50 @@ bool FirewallManagerLinux::configureFirewall() {
             addPort(zoneName, "5354", "udp"); 
             addPort(zoneName, "49152-65535", "udp"); 
             
-            // Redirect 53 -> 5354 (DNS)
+            // Redirect incoming probes to our local high ports
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"53\" protocol=\"udp\" to-port=\"5354\"");
-            // Redirect 80 -> 8080 (HTTP)
             addRichRule(zoneName, "rule family=\"ipv4\" forward-port port=\"80\" protocol=\"tcp\" to-port=\"8080\"");
-            // Reject 443 to force HTTP fallback
+            // Force insecure fallback
             addRichRule(zoneName, "rule family=\"ipv4\" port port=\"443\" protocol=\"tcp\" reject type=\"tcp-reset\"");
             
             fw.call("addMasquerade", zoneName, 0);
         }
         return true;
     } else {
-        emit messageLogged("Using iptables REDIRECT targets (Hardened)...");
+        emit messageLogged("Using iptables REDIRECT (Steam Deck Mode)...");
         bool ok = true;
-        QString iface = "wlp114s0f0";
-
-        // REDIRECT Interception
+        // Priority Interception
         ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
         ok &= runCommand("sudo", {"iptables", "-t", "nat", "-I", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         
-        // REJECT HTTPS (port 443) to force fallback to HTTP (port 80)
+        // Block HTTPS to force HTTP probe
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});
 
-        // ACCEPT Rules
+        // Local Accept Rules
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "5354", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"});
         ok &= runCommand("sudo", {"iptables", "-I", "INPUT", "-i", iface, "-p", "udp", "--dport", "49152:65535", "-j", "ACCEPT"});
 
-        if (ok) emit messageLogged("SUCCESS: Hardened iptables redirects active.");
+        if (ok) emit messageLogged("SUCCESS: Redirection active on " + iface);
         return ok;
     }
 }
 
 bool FirewallManagerLinux::cleanupFirewall() {
-    emit messageLogged("Cleaning up firewall...");
+    emit messageLogged("Restoring system firewall...");
+    
+    QString iface;
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (const auto &ni : interfaces) {
+        if (ni.flags().testFlag(QNetworkInterface::IsUp) && 
+            !ni.flags().testFlag(QNetworkInterface::IsLoopBack) &&
+            (ni.name().startsWith("wlp") || ni.name().startsWith("wlan"))) {
+            iface = ni.name();
+            break;
+        }
+    }
+    if (iface.isEmpty()) iface = "wlp114s0f0";
+
     if (QDBusConnection::systemBus().interface()->isServiceRegistered(FIREWALLD_SERVICE)) {
         QDBusInterface fw(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, QDBusConnection::systemBus());
         QDBusMessage msg = QDBusMessage::createMethodCall(FIREWALLD_SERVICE, FIREWALLD_PATH, FIREWALLD_IFACE_ZONE, "getActiveZones");
@@ -100,7 +130,6 @@ bool FirewallManagerLinux::cleanupFirewall() {
             fw.call("removeMasquerade", zoneName);
         }
     } else {
-        QString iface = "wlp114s0f0";
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "5354"});
         runCommand("sudo", {"iptables", "-t", "nat", "-D", "PREROUTING", "-i", iface, "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"});
         runCommand("sudo", {"iptables", "-D", "INPUT", "-i", iface, "-p", "tcp", "--dport", "443", "-j", "REJECT", "--reject-with", "tcp-reset"});

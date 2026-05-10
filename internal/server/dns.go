@@ -18,7 +18,7 @@ func NewDNSSpoofer(targetIP string) *DNSSpoofer {
 }
 
 func (s *DNSSpoofer) Start() error {
-	// Listen on 5354 (non-conflicting)
+	// Bind to high port 5354. No root/setcap needed.
 	// Firewall will REDIRECT 53 -> 5354
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:5354")
 	if err != nil {
@@ -32,7 +32,10 @@ func (s *DNSSpoofer) Start() error {
 	}
 	s.conn = conn
 
-	log.Printf("DNS SPOOFER ACTIVE on %s. Redirecting all names to %s", s.conn.LocalAddr().String(), s.targetIP)
+	log.Printf("--------------------------------------------------")
+	log.Printf("DNS SPOOFER ACTIVE on %s (User Mode)", s.conn.LocalAddr().String())
+	log.Printf("Redirecting all probes to %s", s.targetIP)
+	log.Printf("--------------------------------------------------")
 	os.Stdout.Sync()
 
 	go func() {
@@ -62,12 +65,11 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 
 	for _, question := range msg.Questions {
 		name := question.Name.String()
-		log.Printf("INCOMING DNS PROBE: %s [%s] from %s", name, question.Type.String(), addr.String())
+		log.Printf("INCOMING DNS PROBE: %s [%s]", name, question.Type.String())
 		os.Stdout.Sync()
 
 		msg.Response = true
 		msg.Authoritative = true
-		msg.RecursionAvailable = false
 
 		if question.Type == dnsmessage.TypeA {
 			ip := net.ParseIP(s.targetIP).To4()
@@ -77,7 +79,7 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 						Name:  question.Name,
 						Type:  dnsmessage.TypeA,
 						Class: dnsmessage.ClassINET,
-						TTL:   10,
+						TTL:   5,
 					},
 					Body: &dnsmessage.AResource{A: [4]byte{ip[0], ip[1], ip[2], ip[3]}},
 				}
@@ -88,7 +90,6 @@ func (s *DNSSpoofer) handleQuery(addr *net.UDPAddr, msg dnsmessage.Message) {
 		} else if question.Type == dnsmessage.TypeAAAA {
 			log.Printf("SPOOFING AAAA -> EMPTY (Force IPv4)")
 			os.Stdout.Sync()
-			// No answer = NOERROR, forcing client to fallback to A record
 		}
 	}
 

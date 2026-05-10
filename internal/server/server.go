@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -38,19 +37,6 @@ func (s *Server) HandleFunc(pattern string, handler http.HandlerFunc) {
 	s.handlers[pattern] = handler
 }
 
-type connLogger struct {
-	net.Listener
-}
-
-func (l *connLogger) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err == nil {
-		log.Printf("!!! RAW TCP CONNECTION !!! From: %s", c.RemoteAddr())
-		os.Stdout.Sync()
-	}
-	return c, err
-}
-
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -68,33 +54,13 @@ func (s *Server) Start() error {
 		log.Printf("!!! HTTP ACCESS !!! %s %s %s [UA: %s]", r.Method, host, path, ua)
 		os.Stdout.Sync()
 
-		// --- STEP 1: FORCE STANDARD ONLINE HEADERS ---
+		// Headers for all responses
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 		w.Header().Set("Connection", "close")
 
-		// --- STEP 2: IDENTIFY PROBE TYPE ---
-		isSystem := strings.Contains(ua, "Dalvik") || 
-			strings.Contains(ua, "CaptivePortal") || 
-			strings.Contains(ua, "NetworkCheck") ||
-			strings.Contains(ua, "ConnMan") ||
-			strings.Contains(ua, "wispr") ||
-			ua == ""
-
-		isProbePath := strings.Contains(path, "generate_204") || 
-			strings.Contains(path, "gen_204") || 
-			strings.Contains(path, "check_network_status") ||
-			strings.Contains(path, "success.txt") ||
-			strings.Contains(path, "ncsi.txt") ||
-			strings.Contains(path, "connecttest") ||
-			strings.Contains(path, "hotspot-detect") ||
-			strings.Contains(path, "status.html") ||
-			strings.Contains(path, "success.html")
-
-		// --- STEP 3: SATISFY PROBES ---
-		
-		// A. ConnMan / Tesla Specific (status.html + Header)
+		// 1. ConnMan / Tesla WISPr Specific
 		if strings.Contains(path, "status.html") {
 			log.Printf("!!! SATISFYING CONNMAN PROBE !!! -> 200 OK 'online'")
 			w.Header().Set("X-ConnMan-Status", "online")
@@ -104,7 +70,7 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// B. Microsoft / Android NCSI (Magic String)
+		// 2. Microsoft / Android NCSI
 		if strings.Contains(path, "connecttest.txt") || strings.Contains(path, "ncsi.txt") {
 			log.Printf("!!! SATISFYING NCSI PROBE !!! -> 200 OK")
 			w.Header().Set("Content-Type", "text/plain")
@@ -113,7 +79,7 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// C. Apple Success (Specific HTML)
+		// 3. Apple Detection
 		if strings.Contains(path, "hotspot-detect.html") || strings.Contains(path, "success.html") {
 			log.Printf("!!! SATISFYING APPLE PROBE !!! -> 200 OK")
 			w.Header().Set("Content-Type", "text/html")
@@ -122,7 +88,16 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// D. Google / Android / Tesla (Zero-Byte 204)
+		// 4. Identification of Background Probes
+		isSystem := strings.Contains(ua, "Dalvik") || 
+			strings.Contains(ua, "CaptivePortal") || 
+			strings.Contains(ua, "NetworkCheck") ||
+			strings.Contains(ua, "ConnMan") ||
+			strings.Contains(ua, "wispr") ||
+			ua == ""
+
+		isProbePath := strings.Contains(path, "generate_204") || strings.Contains(path, "gen_204")
+
 		if isProbePath || (isSystem && path == "/") {
 			log.Printf("!!! SATISFYING CONNECTIVITY CHECK !!! -> 204 No Content")
 			w.Header().Set("X-Android-Response", "204")
@@ -130,12 +105,11 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// --- STEP 4: INTENTIONAL APP ACCESS ---
+		// 5. Normal App Access
 		isBrowser := strings.Contains(ua, "Mozilla") || strings.Contains(ua, "Chrome") || strings.Contains(ua, "Safari")
 		isTargetHost := host == "10.42.0.1" || host == "10.42.0.1:8080" || strings.Contains(host, "tesla.stream")
 
 		if isBrowser && isTargetHost {
-			// Serve the actual app
 			if path == "/" || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
 				mux.ServeHTTP(w, r)
 			} else {
@@ -144,24 +118,18 @@ func (s *Server) Start() error {
 			return
 		}
 
-		// --- STEP 5: GREEDY HIJACK (FORCED SUCCESS) ---
+		// 6. Final Greedy Hijack (Random domain unresolved)
 		log.Printf("!!! GREEDY HIJACK (%s) !!! -> 204 No Content", host)
 		w.Header().Set("X-Tesla-Streamer-Spoof", "true")
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	log.Printf("--------------------------------------------------")
-	log.Printf("TESLA STREAMER BACKEND READY ON %s", s.addr)
+	log.Printf("TESLA STREAMER BACKEND READY ON %s (User Mode)", s.addr)
 	log.Printf("--------------------------------------------------")
 	os.Stdout.Sync()
 
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-	loggedLn := &connLogger{ln}
-
-	return http.Serve(loggedLn, mainHandler)
+	return http.ListenAndServe(s.addr, mainHandler)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
