@@ -53,21 +53,20 @@ A native Decky Loader plugin is available in the `decky-plugin/` directory.
 2. Click **Start Tesla Mode** to initialize the Wi-Fi hotspot (if needed).
 3. Connect your Tesla to the Wi-Fi network (SSID: `TeslaStreamer`).
 4. Click **Start Server** and select the window or screen you want to share.
-5. In your Tesla browser, navigate to the URL shown in the GUI (e.g., `http://play.tesla.stream:8080`).
-6. Click **LAUNCH STREAM** on the web page.
+5. In your Tesla browser, navigate to the URL shown in the GUI: **`http://play.tesla.stream`**.
+6. The dashboard will load automatically; ensure you are connected to the `TeslaStreamer` Wi-Fi.
 
-## Offline Mode (Captive Portal Spoofing)
-To ensure the Tesla browser stays connected even without a cellular signal, Tesla Streamer includes a built-in DNS spoofer and connectivity responder.
+## Offline Mode (IMPORTANT)
 
-### Prerequisites for Offline Mode
-1.  **Port 53:** The DNS spoofer needs to bind to port 53. On Linux, this requires special permissions:
-    ```bash
-    sudo setcap 'cap_net_bind_service=+ep' ./tesla-streamer
-    ```
-2.  **Firewall:** Ensure UDP port 53 is open (see Firewall section).
+**Current Status:** Offline Mode (DNS/HTTP Spoofing) is currently **non-functional**. Despite extensive development, modern Android and Tesla browsers often reject the spoofed connectivity checks, and the exact mechanism for a perfect "silent" connection is still being researched.
 
-### How it works
-When active, the spoofer tells the car that your Steam Deck is the gateway for all internet traffic. The car's "Connectivity Check" will hit our server, receive a "Success" response, and keep the Wi-Fi connection alive.
+### Hardware Requirements
+To use Tesla Streamer with internet bridging (recommended), you currently need one of the following setups:
+1.  **Dual Wi-Fi Adapters:** One to connect to the internet, and a second one (e.g., a USB dongle) to create the `TeslaStreamer` hotspot.
+2.  **Wi-Fi + Ethernet:** Connect your Steam Deck/Laptop to the internet via Ethernet, and use the built-in Wi-Fi to create the hotspot.
+
+### Why Offline Mode is difficult
+When active, the spoofer attempts to tell the car that your Steam Deck is the gateway for all internet traffic. However, modern "Connectivity Check" services are extremely strict about SSL/TLS handshakes and specific HTTP 204 response patterns that are difficult to replicate perfectly without a real internet connection.
 
 ## Firewall Configuration (firewalld)
 If you are using `firewalld` (default on Fedora), you need to open the following ports to allow the Tesla to connect:
