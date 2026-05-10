@@ -76,10 +76,10 @@ func (w *WaylandCapturer) Start() error {
 
 	// Select Sources
 	// types: 1 = Monitor, 2 = Window. We use 3 (1|2) to allow both.
-	// cursor_mode: 2 = Embedded (render cursor directly in the stream)
+	// cursor_mode: 4 = Metadata (allow pipewiresrc to handle cursor rendering)
 	options = map[string]dbus.Variant{
 		"types":       dbus.MakeVariant(uint32(3)),
-		"cursor_mode": dbus.MakeVariant(uint32(2)),
+		"cursor_mode": dbus.MakeVariant(uint32(4)),
 	}
 	err = obj.Call(screenCastIface+".SelectSources", 0, sessionPath, options).Store(&requestPath)
 	if err != nil {

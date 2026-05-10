@@ -69,7 +69,7 @@ func NewGStreamerPipeline(nodeID uint32, track *webrtc.TrackLocalStaticSample, c
 		}
 	}
 
-	source := fmt.Sprintf("pipewiresrc path=%d do-timestamp=true", nodeID)
+	source := fmt.Sprintf("pipewiresrc path=%d do-timestamp=true keep-cursor=true", nodeID)
 	if nodeID == 0 {
 		log.Println("No PipeWire Node ID provided, falling back to videotestsrc")
 		source = "videotestsrc is-live=true ! video/x-raw,framerate=30/1"
