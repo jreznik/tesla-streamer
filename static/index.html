@@ -8,7 +8,7 @@
         :root {
             --tesla-red: #E82127;
             --tesla-bg: #111111;
-            --tesla-card: rgba(30, 30, 30, 0.9);
+            --tesla-card: rgba(30, 30, 30, 0.95);
             --tesla-text: #F4F4F4;
             --tesla-gray: #8E8E93;
         }
@@ -18,57 +18,57 @@
             padding: 0;
             width: 100%;
             height: 100%;
-            background-color: var(--tesla-bg);
+            background-color: #000;
             color: var(--tesla-text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             overflow: hidden;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
         }
 
         #video-container {
             position: relative;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #000;
         }
 
         video {
-            max-width: 100%;
-            max-height: 100%;
             width: 100%;
             height: 100%;
             object-fit: contain;
             background-color: #000;
+            z-index: 1;
         }
 
-        /* Tesla-Style Status Overlay */
+        /* Fixed Centered Overlay */
         .status-overlay {
             position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             z-index: 100;
             text-align: center;
             background: var(--tesla-card);
             padding: 40px;
             border-radius: 20px;
             border: 1px solid #333;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            min-width: 300px;
-            backdrop-filter: blur(10px);
-            transition: opacity 0.5s ease-in-out;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            min-width: 280px;
+            /* Removed backdrop-filter for compatibility */
+            transition: opacity 0.5s ease;
         }
 
-        /* Animated Spinner (Tesla Style) */
         .spinner {
-            width: 60px;
-            height: 60px;
+            width: 50px;
+            height: 50px;
             margin: 0 auto 25px;
-            border: 3px solid rgba(232, 33, 39, 0.2);
-            border-top: 3px solid var(--tesla-red);
+            border: 4px solid rgba(232, 33, 39, 0.1);
+            border-top: 4px solid var(--tesla-red);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -79,28 +79,24 @@
         }
 
         .status-text {
-            font-size: 28px;
+            font-size: 24px;
             margin-bottom: 12px;
-            font-weight: 400;
-            letter-spacing: 0.5px;
+            font-weight: 500;
         }
 
         .status-detail {
-            font-size: 16px;
+            font-size: 14px;
             color: var(--tesla-gray);
             font-weight: 300;
-            line-height: 1.5;
         }
 
-        /* Pulsing effect for text */
         .pulse {
             animation: pulse-text 2s infinite ease-in-out;
         }
 
         @keyframes pulse-text {
-            0% { opacity: 0.6; }
+            0%, 100% { opacity: 0.5; }
             50% { opacity: 1; }
-            100% { opacity: 0.6; }
         }
 
         .stats-overlay {
@@ -108,25 +104,27 @@
             top: 20px;
             left: 20px;
             background: rgba(0, 0, 0, 0.6);
-            padding: 10px 15px;
-            border-radius: 12px;
-            font-family: 'SF Mono', monospace;
-            font-size: 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 11px;
             color: #00FF00;
             pointer-events: none;
             display: none;
             border: 1px solid #444;
-            z-index: 1000;
+            z-index: 200;
         }
 
         .controls {
             position: absolute;
             bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
             opacity: 0;
-            transition: opacity 0.5s;
+            transition: opacity 0.3s;
             display: flex;
-            gap: 15px;
-            z-index: 200;
+            gap: 12px;
+            z-index: 150;
         }
 
         #video-container:hover .controls {
@@ -134,56 +132,44 @@
         }
 
         button {
-            background: var(--tesla-card);
-            border: 1px solid #444;
-            color: var(--tesla-text);
-            padding: 12px 24px;
-            border-radius: 30px;
+            background: rgba(40, 40, 40, 0.9);
+            border: 1px solid #555;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
             cursor: pointer;
-            font-size: 15px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.2s;
-            backdrop-filter: blur(5px);
+            font-size: 14px;
+            white-space: nowrap;
         }
 
         button:hover {
-            background: #333;
             border-color: var(--tesla-red);
-        }
-
-        .error-icon {
-            color: var(--tesla-red);
-            font-size: 48px;
-            margin-bottom: 20px;
         }
 
         .hidden {
             display: none !important;
-            opacity: 0;
         }
     </style>
 </head>
 <body>
     <div id="video-container">
-        <!-- Dashboard Overlay -->
+        <!-- Video first in DOM -->
+        <video id="remoteVideo" autoplay playsinline muted></video>
+
+        <!-- Overlay second to ensure it is on top -->
         <div id="status-overlay" class="status-overlay">
             <div id="status-visual">
                 <div class="spinner"></div>
             </div>
-            <div id="status-text" class="status-text pulse">Initializing</div>
-            <div id="status-detail" class="status-detail">Preparing secure streaming link...</div>
+            <div id="status-text" class="status-text pulse">Connecting</div>
+            <div id="status-detail" class="status-detail">Initialing handshake...</div>
         </div>
 
         <div id="stats" class="stats-overlay"></div>
         
-        <video id="remoteVideo" autoplay playsinline muted></video>
-
-        <!-- Hidden controls that appear on hover -->
         <div class="controls">
-            <button onclick="requestKeyframe()">Refresh Link</button>
-            <button id="stats-toggle" onclick="toggleStats()">Network Stats</button>
+            <button onclick="requestKeyframe()">Refresh</button>
+            <button id="stats-toggle" onclick="toggleStats()">Stats</button>
             <button onclick="toggleFullscreen()">Maximize</button>
         </div>
     </div>
@@ -200,13 +186,7 @@
         let ws = null;
         let statsInterval = null;
 
-        /**
-         * Tesla-Style Status Updater
-         * @param {string} title - The main heading
-         * @param {string} subtitle - Small gray detail text
-         * @param {boolean} isError - Whether to show red error styling
-         */
-        function setTeslaStatus(title, subtitle = '', isError = false) {
+        function setStatus(title, subtitle = '', isError = false) {
             if (!title) {
                 statusOverlay.classList.add('hidden');
                 return;
@@ -217,7 +197,7 @@
             statusDetail.innerText = subtitle;
 
             if (isError) {
-                statusVisual.innerHTML = '<div class="error-icon">⚠</div>';
+                statusVisual.innerHTML = '<div style="color:#E82127; font-size:40px; margin-bottom:20px">⚠</div>';
                 statusText.classList.remove('pulse');
                 statusText.style.color = '#E82127';
             } else {
@@ -227,8 +207,8 @@
             }
         }
 
-        async function initStream() {
-            setTeslaStatus('Connecting', 'Connecting to Tesla Streamer cloud...');
+        async function init() {
+            setStatus('Connecting', 'Linking to signaling server...');
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -237,15 +217,14 @@
                 ws = new WebSocket(wsUrl);
                 
                 ws.onopen = () => {
-                    setTeslaStatus('Negotiating', 'Handshaking with Steam Deck hardware...');
+                    setStatus('Negotiating', 'Handshaking with hardware...');
                     setupWebRTC();
                 };
 
                 ws.onmessage = async (event) => {
                     const msg = JSON.parse(event.data);
-                    
                     if (msg.type === 'answer') {
-                        setTeslaStatus('Streaming', 'Opening high-speed video pipeline...');
+                        setStatus('Streaming', 'Establishing data link...');
                         await pc.setRemoteDescription(new RTCSessionDescription({
                             type: 'answer',
                             sdp: msg.sdp
@@ -262,16 +241,16 @@
                 };
 
                 ws.onclose = () => {
-                    setTeslaStatus('Disconnected', 'Hotspot connection lost. Reconnecting...', true);
-                    setTimeout(initStream, 3000);
+                    setStatus('Disconnected', 'Retrying in 3s...', true);
+                    setTimeout(init, 3000);
                 };
 
                 ws.onerror = () => {
-                    setTeslaStatus('Connection Error', 'Unable to reach the Steam Deck server.', true);
+                    setStatus('Network Error', 'Check server status.', true);
                 };
 
             } catch (e) {
-                setTeslaStatus('Startup Failed', e.message, true);
+                setStatus('Failed', e.message, true);
             }
         }
 
@@ -282,28 +261,22 @@
 
             pc.onicecandidate = (event) => {
                 if (event.candidate) {
-                    ws.send(JSON.stringify({
-                        type: 'candidate',
-                        candidate: event.candidate
-                    }));
+                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
                 }
             };
 
             pc.ontrack = (event) => {
-                console.log('Remote track received');
+                console.log('Track received');
                 remoteVideo.srcObject = event.streams[0];
-                // Fade out overlay when video starts
-                setTimeout(() => setTeslaStatus(''), 1000);
+                setTimeout(() => setStatus(''), 1000);
             };
 
             pc.onconnectionstatechange = () => {
-                const state = pc.connectionState;
-                console.log('WebRTC state:', state);
-                if (state === 'connected') {
-                    setTeslaStatus('');
+                if (pc.connectionState === 'connected') {
+                    setStatus('');
                     startStats();
-                } else if (state === 'failed' || state === 'disconnected') {
-                    setTeslaStatus('Stream Interrupted', 'Re-establishing video link...', true);
+                } else if (pc.connectionState === 'failed') {
+                    setStatus('Stream Failed', 'Handshake error.', true);
                 }
             };
 
@@ -311,21 +284,13 @@
 
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-
-            ws.send(JSON.stringify({
-                type: 'offer',
-                sdp: offer.sdp
-            }));
+            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
         }
 
         function setDisplayMode(mode) {
-            if (mode === 'stretch') {
-                remoteVideo.style.objectFit = 'fill';
-            } else if (mode === 'native') {
-                remoteVideo.style.objectFit = 'none';
-            } else {
-                remoteVideo.style.objectFit = 'contain';
-            }
+            if (mode === 'stretch') remoteVideo.style.objectFit = 'fill';
+            else if (mode === 'native') remoteVideo.style.objectFit = 'none';
+            else remoteVideo.style.objectFit = 'contain';
         }
 
         function startStats() {
@@ -334,25 +299,20 @@
                 if (!pc) return;
                 try {
                     const stats = await pc.getStats();
-                    let statsText = '';
                     stats.forEach(report => {
                         if (report.type === 'inbound-rtp' && report.kind === 'video') {
                             const fps = report.framesPerSecond || 0;
                             const bitrate = Math.round(report.bytesReceived * 8 / (report.timestamp / 1000) / 1000);
-                            statsText += `FPS: ${fps} | BITRATE: ${bitrate} KBPS | LOSS: ${report.packetsLost}`;
+                            statsOverlay.innerText = `FPS: ${fps} | BITRATE: ${bitrate} KBPS | LOSS: ${report.packetsLost}`;
                         }
                     });
-                    if (statsText) statsOverlay.innerText = statsText;
                 } catch (e) {}
             }, 1000);
         }
 
         function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen();
-            } else if (document.exitFullscreen) {
-                document.exitFullscreen();
-            }
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+            else document.exitFullscreen();
         }
 
         function requestKeyframe() {
@@ -362,11 +322,9 @@
         function toggleStats() {
             const isVisible = statsOverlay.style.display === 'block';
             statsOverlay.style.display = isVisible ? 'none' : 'block';
-            document.getElementById('stats-toggle').innerText = isVisible ? 'Show Stats' : 'Hide Stats';
         }
 
-        // Auto-start on load
-        window.addEventListener('load', initStream);
+        init();
     </script>
 </body>
 </html>
